@@ -7,6 +7,7 @@ Use this workflow when the repository already has legibility infrastructure and 
 Legibility artifacts drift as code changes. Trigger a maintenance pass when:
 
 - a major feature lands or a module is added, renamed, or removed
+- a new subproject is added to a monorepo (see [monorepo.md](monorepo.md))
 - the scoring script shows a dimension has dropped
 - an agent session reveals a gap — it could not find what it needed or followed stale guidance
 - decision records or ExecPlans have not been updated in a while
