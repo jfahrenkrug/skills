@@ -45,9 +45,46 @@ Choose the workflow that matches the current need:
 
 - **Initial setup** — auditing a repo and creating legibility infrastructure from scratch. See [setup.md](setup.md).
   Use when the user asks to: "improve this repo's agentic legibility", "set up agentic legibility", "add AGENTS.md", "make this repo agent-friendly", "set up docs for agents", or "score this repo" and no legibility infrastructure exists yet.
+  Initial setup is needed when any or all of the following artifacts are missing:
+  - AGENTS.md
+  - .agents/
+  - .agents/PLANS.md
+  - docs/
+  - docs/exec-plans/
 
 - **Maintenance** — keeping existing legibility artifacts current as the code evolves, re-scoring, and doc gardening. See [maintain.md](maintain.md).
   Use when the user asks to: "update the agent docs", "update agentic legibility", "re-score the repo", "the architecture changed, update AGENTS.md", "garden the docs", or "check if the docs are still current".
+
+## Workflow Selection
+
+Choose the workflow using this precedence order:
+
+1. Run **Initial setup** if any required legibility artifact is missing.
+2. Run **Maintenance** only if all required legibility artifacts already exist.
+
+Treat this as a hard gate. Do not choose Maintenance just because the repository has partial legibility infrastructure.
+
+The required artifacts are:
+
+- `AGENTS.md`
+- `.agents/`
+- `.agents/PLANS.md`
+- `docs/`
+- `docs/exec-plans/`
+
+If even one item in that list is missing, the task is **Initial setup**.
+
+## First Step
+
+Before choosing a workflow, list the required artifact paths and mark each one as present or missing in your notes. Base workflow selection on that checklist, not on overall impression.
+
+## Common Misclassification To Avoid
+
+Do not infer **Maintenance** from partial infrastructure such as an existing `AGENTS.md`, `docs/`, or custom agent-support folders like `.agent/`.
+
+Custom or legacy structures do not satisfy the required-artifact check unless they include the exact required paths above, or the user explicitly asks to preserve an alternative convention.
+
+When the repository contains a near-miss structure such as `.agent/` instead of `.agents/PLANS.md`, treat that as evidence for migration or integration work under **Initial setup**, not as justification for **Maintenance**.
 
 Both workflows use the same scoring tool and reference materials:
 
