@@ -77,6 +77,18 @@ const ROOT_MAP_DOCS = [
    'CONTRIBUTING.md',
    'README.md',
 ];
+const GENERIC_NESTED_SCOPE_SEGMENTS = [
+   /^docs?$/u,
+   /^examples?$/u,
+   /^demos?([_-].+)?$/u,
+   /^benchmarks?$/u,
+   /^tests?([_-].+)?$/u,
+   /^tutorials?$/u,
+   /^samples?$/u,
+   /^fixtures?$/u,
+   /^__tests__$/u,
+   /^\.[a-z0-9_-]+$/u,
+];
 
 function toPosix(value) {
    return value.split(path.sep).join('/');
@@ -335,17 +347,6 @@ function normalizeScope(root, scope) {
    return normalized || ROOT_SCOPE;
 }
 
-function scopeCandidatesForPath(relpath) {
-   const parts = relpath.split('/');
-   const candidates = [];
-
-   for (let index = 1; index < parts.length; index += 1) {
-      candidates.push(parts.slice(0, index).join('/'));
-   }
-
-   return candidates;
-}
-
 function rootRoutesToScope(rootReadme, scope) {
    return rootReadme.includes(`${scope}/`)
       || rootReadme.includes(`\`${scope}\``)
@@ -412,6 +413,22 @@ function scoreScopeSignals(signals) {
    }
 
    return score;
+}
+
+function isLikelyNestedUtilityScope(scope, signals) {
+   if (hasSignal(signals, 'agent_doc:') || hasSignal(signals, 'root_routes_here:')) {
+      return false;
+   }
+
+   const parts = scope.split('/');
+
+   if (parts.length < 3) {
+      return false;
+   }
+
+   return parts.slice(1).some((part) => {
+      return GENERIC_NESTED_SCOPE_SEGMENTS.some((pattern) => pattern.test(part));
+   });
 }
 
 async function collectContext(root, excludes) {
@@ -609,20 +626,18 @@ function discoverScopes(ctx) {
          setDefault(signalsByScope, directScope).add('scope_readme:README.md');
       }
 
-      for (const scope of scopeCandidatesForPath(relpath)) {
-         const signals = setDefault(signalsByScope, scope);
+      const signals = setDefault(signalsByScope, directScope);
 
-         if (TASK_FILE_NAMES.has(filename) && ctx.task_surface_files.has(relpath)) {
-            signals.add(`task_surface:${parts[parts.length - 1]}`);
-         }
+      if (TASK_FILE_NAMES.has(filename) && ctx.task_surface_files.has(relpath)) {
+         signals.add(`task_surface:${parts[parts.length - 1]}`);
+      }
 
-         if (MANIFEST_FILE_NAMES.has(filename)) {
-            signals.add(`manifest:${parts[parts.length - 1]}`);
-         }
+      if (MANIFEST_FILE_NAMES.has(filename)) {
+         signals.add(`manifest:${parts[parts.length - 1]}`);
+      }
 
-         if (rootRoutesToScope(rootReadme, scope)) {
-            signals.add('root_routes_here:README.md');
-         }
+      if (rootRoutesToScope(rootReadme, directScope)) {
+         signals.add('root_routes_here:README.md');
       }
    }
 
@@ -634,7 +649,7 @@ function discoverScopes(ctx) {
          || hasSignal(signals, 'task_surface:')
          || hasSignal(signals, 'manifest:');
 
-      if (score >= 3 && strongSignal) {
+      if (score >= 3 && strongSignal && !isLikelyNestedUtilityScope(scope, signals)) {
          candidates.push({ path: scope, signals: Array.from(signals).sort(), score });
       }
    }

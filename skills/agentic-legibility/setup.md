@@ -9,6 +9,9 @@ If the repository is a monorepo with multiple projects or packages, see [monorep
 1. **Audit the current repo-visible guidance.**
    Inspect the root `README.md`, `AGENTS.md`, `CLAUDE.md`, `docs/`, task entrypoints, validation commands, and any existing decision records. Run the scoring script if available to establish a baseline.
 
+   In monorepos, also run `score_repo.js --list-scopes` and keep a working inventory of every
+   discovered scope. Do not treat the inventory as optional background information.
+
 2. **Establish a small stable entrypoint.**
    Keep root `AGENTS.md` under roughly 100 lines. Use it to route agents to the right files, commands, and constraints.
 
@@ -39,7 +42,14 @@ Create or tighten:
 - `AGENTS.md`
 - `CLAUDE.md` pointing to `AGENTS.md` via the `@AGENTS.md` include convention when the repo targets Claude Code
 
-`AGENTS.md` should cover only the essentials:
+If `AGENTS.md` already exists, preserve its current contents. Do not rewrite it from scratch just to match this skill's preferred template. Instead, add or tighten only the sections needed for agentic legibility, especially:
+
+- where ExecPlans live and when to use them
+- a concise repo map that routes agents to the right docs, packages, or subprojects
+
+If no `AGENTS.md` exists, initialize one in the usual compact style and include the same agentic-legibility sections from the start.
+
+When you are creating a new one, `AGENTS.md` should cover only the essentials:
 
 - repo purpose in 1-2 sentences
 - where architecture docs live
@@ -48,6 +58,16 @@ Create or tighten:
 - canonical validation commands
 - available repo-local skills or agent helpers
 - hard constraints worth surfacing at the root
+
+In a monorepo, the root map must also account for every scope returned by `score_repo.js --list-scopes`.
+Each scope must be:
+
+- listed directly in the root `AGENTS.md`
+- routed through a linked parent-directory `AGENTS.md`
+- or explicitly excluded with a written rationale in the task notes or ExecPlan
+
+If the scope list is long, prefer parent-directory maps such as `tools/AGENTS.md` or
+`experiments/AGENTS.md` over silently collapsing discovered scopes into broad buckets.
 
 Do not turn `AGENTS.md` into an encyclopedia.
 
@@ -127,7 +147,7 @@ Some repositories use `.agent` (singular) instead of the more common `.agents` (
 6. **Remove the empty `.agent/` directory and any empty child directories** once everything has been moved and all references updated.
 
 7. **Verify.** Confirm both naming and plan-location migration are complete:
-   - Search for stale `.agent/` references and update or remove them.
+   - You must search for stale `.agent/` references in all Markdown files and update or remove them.
    - Search for plan documents outside `docs/exec-plans/active/` and `docs/exec-plans/completed/` and either migrate them or document why they are intentionally different.
    - Exclude `.git/` from these searches.
 
