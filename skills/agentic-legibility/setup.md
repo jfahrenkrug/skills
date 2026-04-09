@@ -2,6 +2,8 @@
 
 Use this workflow when a repository has little or no legibility infrastructure. The goal is to audit what exists and create the minimum set of artifacts that let a fresh agent work without tribal knowledge.
 
+If the repository is a monorepo with multiple projects or packages, see [monorepo.md](monorepo.md) for guidance on root vs. subproject agent docs, cross-project architecture, and scoped scoring.
+
 ## Workflow
 
 1. **Audit the current repo-visible guidance.**
@@ -71,6 +73,63 @@ Every ExecPlan should be self-contained and include:
 Treat the plan as a living document. Update progress with timestamps. Record changes in direction and unexpected findings while the work is happening.
 
 For usage notes and section expectations, see [references/execplans.md](references/execplans.md).
+
+### Migrating Existing ExecPlans
+
+If the repository already has ExecPlans in non-standard locations, migrate them into the `docs/exec-plans/` structure:
+
+1. **Find existing plans.** Look for ExecPlan-style documents in common locations:
+   - `.agent/` or `.agents/` (with or without trailing `s`)
+   - Scattered under `docs/` without a dedicated subdirectory
+   - Inside project management or design directories
+
+2. **Classify each plan as active or completed.** A plan is active if its `Progress` section has unchecked items or it lacks an `Outcomes & Retrospective` entry. Everything else is completed.
+
+3. **Create the target structure first.**
+   - Create `docs/exec-plans/active/`
+   - Create `docs/exec-plans/completed/`
+   - Create `docs/exec-plans/README.md` indexing all plans with a one-line description of each.
+
+4. **Move plans into the target structure.**
+   - Active plans go to `docs/exec-plans/active/`
+   - Completed plans go to `docs/exec-plans/completed/`
+   - Preserve useful filenames, but normalize vague names like `plan.md` into something specific such as `auth-session-hardening.md`.
+   - If an old location contains a whole directory of plans, move each plan into `active/` or `completed/` individually rather than keeping the old directory shape under `docs/exec-plans/`.
+
+5. **Update internal references.** Search the repo for links pointing to the old plan locations and update them to the new paths. Check `AGENTS.md`, `README.md`, other docs, and code comments.
+
+6. **Clean up empty source directories.** After moving all plans out of their original locations, remove any directories that are now empty:
+   - Delete empty legacy plan folders such as `plans/`, `exec-plans/`, `.agent/plans/`, or ad-hoc docs subfolders that only existed to hold the old plans.
+   - If a parent directory still has non-plan content, keep it and remove only the empty migrated subfolders.
+
+### Migrating `.agent` to `.agents`
+
+Some repositories use `.agent` (singular) instead of the more common `.agents` (plural). Standardize on `.agents`:
+
+1. **Create `.agents/` if it does not exist.**
+
+2. **Move all contents from `.agent/` to `.agents/`.** Preserve the directory structure inside. If `.agents/` already has files, merge carefully — do not overwrite newer files with older ones.
+
+3. **Copy `PLANS.md` from this skill's directory to `.agents/PLANS.md`** if it does not already exist there.
+
+4. **Update all references.** Search the repo for `.agent/` (with and without leading dot, with and without trailing slash) and update to `.agents/`. Common locations:
+   - `AGENTS.md` and `CLAUDE.md`
+   - `docs/` indexes
+   - CI/CD configuration files
+   - `.gitignore` entries
+   - Script paths
+
+5. **Move plan documents into `docs/exec-plans/` as part of the rename.**
+   - If `.agent/` contains ExecPlans, do not leave them under `.agents/`.
+   - Classify them as active or completed and move them into `docs/exec-plans/active/` or `docs/exec-plans/completed/`.
+   - Keep `.agents/` for agent-facing infrastructure such as `PLANS.md`, local skills, prompts, and helper metadata.
+
+6. **Remove the empty `.agent/` directory and any empty child directories** once everything has been moved and all references updated.
+
+7. **Verify.** Confirm both naming and plan-location migration are complete:
+   - Search for stale `.agent/` references and update or remove them.
+   - Search for plan documents outside `docs/exec-plans/active/` and `docs/exec-plans/completed/` and either migrate them or document why they are intentionally different.
+   - Exclude `.git/` from these searches.
 
 ### Progressive Docs Tree
 
