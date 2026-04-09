@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agentic Legibility"
+  short_description: "Make a repo easier for coding agents to navigate and use"
+  default_prompt: "Use $agentic-legibility to improve this repository's AGENTS.md, docs, ExecPlans, and agent-facing entrypoints."
