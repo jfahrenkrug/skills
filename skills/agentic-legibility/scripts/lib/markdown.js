@@ -176,3 +176,112 @@ export function resolveReference(link, referenceDefinitions) {
    const label = link.href.replace(/^ref:/u, '');
    return referenceDefinitions.get(label) ?? null;
 }
+
+/**
+ * Walk Markdown text and return shell-ish code snippets suitable for scanning
+ * for task-runner invocations.  Yields one entry per fenced-code-block line
+ * (excluding the fence delimiters) and one entry per inline code span.
+ *
+ * @param {string} text
+ * @returns {Array<{ snippet: string, line: number }>}
+ */
+export function extractCodeSnippets(text) {
+   const lines = text.split(/\r?\n/u);
+   const snippets = [];
+   let inFence = false;
+   let fenceMarker = '';
+
+   for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index];
+      const lineNumber = index + 1;
+
+      if (inFence) {
+         if (isClosingFence(line, fenceMarker)) {
+            inFence = false;
+            fenceMarker = '';
+            continue;
+         }
+         snippets.push({ snippet: line, line: lineNumber });
+         continue;
+      }
+
+      const fenceMatch = line.match(FENCE_OPEN);
+      if (fenceMatch) {
+         inFence = true;
+         fenceMarker = fenceMatch[2];
+         continue;
+      }
+
+      const inlineRegex = /`([^`\n]+)`/gu;
+      let match;
+      while ((match = inlineRegex.exec(line)) !== null) {
+         snippets.push({ snippet: match[1], line: lineNumber });
+      }
+   }
+
+   return snippets;
+}
+
+const TASK_REFERENCE_PATTERNS = [
+   { runner: 'npm', regex: /(?:^|[\s&;|(])(?:npm|pnpm|yarn|bun)\s+run(?:-script)?\s+([A-Za-z0-9_.:-]+)/gu },
+   { runner: 'make', regex: /(?:^|[\s&;|(])make\s+([A-Za-z0-9_.:-]+)/gu },
+   { runner: 'just', regex: /(?:^|[\s&;|(])just\s+([A-Za-z0-9_.:-]+)/gu },
+   { runner: 'task', regex: /(?:^|[\s&;|(])task\s+([A-Za-z0-9_.:-]+)/gu },
+   { runner: 'cargo', regex: /(?:^|[\s&;|(])cargo\s+([A-Za-z0-9_.:-]+)/gu },
+];
+
+function isPlaceholderToken(token) {
+   if (/^[A-Z]$/u.test(token)) return true;
+   if (/^[A-Z][A-Z0-9_-]*$/u.test(token) && token.length <= 8) return true;
+   return false;
+}
+
+const MAKE_BUILTINS = new Set([ 'clean', 'all', 'install', 'help' ]);
+const CARGO_BUILTINS = new Set([
+   'build', 'check', 'clean', 'doc', 'fetch', 'fix', 'generate-lockfile',
+   'init', 'install', 'locate-project', 'login', 'logout', 'metadata', 'new',
+   'owner', 'package', 'pkgid', 'publish', 'read-manifest', 'remove', 'run',
+   'rustc', 'rustdoc', 'search', 'test', 'tree', 'uninstall', 'update', 'vendor',
+   'verify-project', 'version', 'yank',
+   'clippy', 'fmt', 'miri', 'audit', 'expand', 'bench',
+]);
+
+/**
+ * Scan Markdown text for task-runner invocations that name a custom task or
+ * target.  Returns references to commands whose second token looks like a
+ * user-defined task name (not a built-in subcommand of the runner).
+ *
+ * For runners where every second token is a user-defined task name (make,
+ * just, task), the token is returned as-is.  For npm/pnpm/yarn/bun the
+ * extractor only recognizes `run <name>` / `run-script <name>`, so package
+ * manager built-ins like `npm install` are ignored.  For cargo the extractor
+ * filters out built-in subcommands and only returns aliases.
+ *
+ * @param {string} text
+ * @returns {Array<{ runner: string, token: string, line: number, raw: string }>}
+ */
+export function extractTaskReferences(text) {
+   const snippets = extractCodeSnippets(text);
+   const references = [];
+
+   for (const { snippet, line } of snippets) {
+      for (const { runner, regex } of TASK_REFERENCE_PATTERNS) {
+         regex.lastIndex = 0;
+         let match;
+         while ((match = regex.exec(snippet)) !== null) {
+            const token = match[1];
+            if (isPlaceholderToken(token)) continue;
+            if (runner === 'make' && MAKE_BUILTINS.has(token)) continue;
+            if (runner === 'cargo' && CARGO_BUILTINS.has(token)) continue;
+            references.push({
+               runner,
+               token,
+               line,
+               raw: match[0].trimStart(),
+            });
+         }
+      }
+   }
+
+   return references;
+}

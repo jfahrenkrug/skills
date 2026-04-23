@@ -41,11 +41,13 @@ import {
 } from './lib/output.js';
 import { isDirectory, readText, walkRepo } from './lib/fs_walk.js';
 import {
+   extractTaskReferences,
    isExternalHref,
    parseMarkdown,
    resolveReference,
    splitHref,
 } from './lib/markdown.js';
+import { collectTaskSurfaceByRunner } from './lib/task_surface.js';
 
 export const REQUIRED_ARTIFACTS = [
    { path: 'AGENTS.md', kind: 'file', severity: SEVERITY_ERROR, remediation: 'Create AGENTS.md at the repository root with a concise agent map.' },
@@ -255,9 +257,51 @@ export async function checkLinks(root, options = {}) {
    return checkResult('links', findings, summary);
 }
 
+const RUNNER_LABEL = {
+   npm: 'npm/pnpm/yarn/bun',
+   make: 'make',
+   just: 'just',
+   task: 'task',
+   cargo: 'cargo',
+};
+
+export async function checkCommands(root, options = {}) {
+   const excludes = options.excludes || [];
+   const files = await walkRepo(root, excludes);
+   const surfaceByRunner = await collectTaskSurfaceByRunner(root, files);
+   const findings = [];
+   const markdownPaths = files.filter(isMarkdownFile).sort();
+
+   for (const relpath of markdownPaths) {
+      const text = await readText(path.join(root, relpath));
+      const references = extractTaskReferences(text);
+
+      for (const ref of references) {
+         const knownNames = surfaceByRunner[ref.runner];
+         if (!knownNames) continue;
+         if (knownNames.has(ref.token)) continue;
+
+         findings.push(finding(
+            SEVERITY_WARNING,
+            relpath,
+            `Doc references ${RUNNER_LABEL[ref.runner]} task \`${ref.token}\` but it is not defined in the task surface.`,
+            `Define \`${ref.token}\` in the ${RUNNER_LABEL[ref.runner]} task file, or update the doc to name an existing task.`,
+            ref.line
+         ));
+      }
+   }
+
+   const summary = findings.length === 0
+      ? 'All documented task references resolve to the task surface.'
+      : `${findings.length} unresolved task reference${findings.length === 1 ? '' : 's'} in Markdown.`;
+
+   return checkResult('commands', findings, summary);
+}
+
 export const AVAILABLE_CHECKS = {
    artifacts: checkArtifacts,
    links: checkLinks,
+   commands: checkCommands,
 };
 
 export async function runAudit(root, selectedChecks) {

@@ -148,6 +148,42 @@ export function parseCargoAliases(text) {
    return targets;
 }
 
+/**
+ * Like `collectTaskSurface`, but keeps each runner's names in its own bucket so
+ * callers can cross-reference `npm run X` against `npm` scripts specifically
+ * rather than the flattened union of every runner's names.
+ *
+ * @returns {Promise<{ npm: Set<string>, make: Set<string>, just: Set<string>, task: Set<string>, cargo: Set<string> }>}
+ */
+export async function collectTaskSurfaceByRunner(root, files) {
+   const taskFiles = await readCandidates(files, root, TASK_FILE_PATTERNS);
+   const byRunner = {
+      npm: new Set(),
+      make: new Set(),
+      just: new Set(),
+      task: new Set(),
+      cargo: new Set(),
+   };
+
+   for (const [ relpath, text ] of Object.entries(taskFiles)) {
+      const lower = relpath.toLowerCase();
+
+      if (lower.endsWith('package.json')) {
+         for (const name of parsePackageScripts(text)) byRunner.npm.add(name);
+      } else if (lower.endsWith('makefile')) {
+         for (const name of parseMakeTargets(text)) byRunner.make.add(name);
+      } else if (lower.endsWith('justfile')) {
+         for (const name of parseJustTargets(text)) byRunner.just.add(name);
+      } else if (lower.endsWith('.cargo/config.toml') || lower.endsWith('.cargo/config')) {
+         for (const name of parseCargoAliases(text)) byRunner.cargo.add(name);
+      } else if (lower.endsWith('.yml') || lower.endsWith('.yaml')) {
+         for (const name of parseTaskfileTargets(text)) byRunner.task.add(name);
+      }
+   }
+
+   return byRunner;
+}
+
 export async function collectTaskSurface(root, files) {
    const taskFiles = await readCandidates(files, root, TASK_FILE_PATTERNS);
    const taskSurface = new Set();
