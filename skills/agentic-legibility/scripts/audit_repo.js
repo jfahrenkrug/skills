@@ -568,8 +568,8 @@ export function parseCliArgs(argv) {
    return args;
 }
 
-async function main() {
-   const args = parseCliArgs(process.argv.slice(2));
+export async function runCli(argv = process.argv.slice(2)) {
+   const args = parseCliArgs(argv);
    const root = path.resolve(args.repo);
 
    if (!(await isDirectory(root))) {
@@ -617,7 +617,7 @@ const invokedAsMain = (() => {
 
 if (invokedAsMain) {
    try {
-      await main();
+      await runCli();
    } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       process.stderr.write(`${message}\n`);

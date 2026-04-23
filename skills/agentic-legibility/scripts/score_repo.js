@@ -922,8 +922,8 @@ export function parseCliArgs(argv) {
 
 export { collectContext, discoverScopes, normalizeMetricNames, METRIC_NAMES };
 
-async function main() {
-   const args = parseCliArgs(process.argv.slice(2));
+export async function runCli(argv = process.argv.slice(2)) {
+   const args = parseCliArgs(argv);
 
    if (args.listMetrics) {
       process.stdout.write(`${METRIC_NAMES.join('\n')}\n`);
@@ -959,6 +959,10 @@ async function main() {
    } else {
       process.stdout.write(`${toMarkdown(report)}\n`);
    }
+}
+
+async function main() {
+   await runCli();
 }
 
 const invokedAsMain = (() => {
