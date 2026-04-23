@@ -48,6 +48,8 @@ import {
    splitHref,
 } from './lib/markdown.js';
 import { collectTaskSurfaceByRunner } from './lib/task_surface.js';
+import { REQUIRED_SECTIONS, parseExecPlan } from './lib/execplans.js';
+import { lastActivityTimestamp } from './lib/git.js';
 
 export const REQUIRED_ARTIFACTS = [
    { path: 'AGENTS.md', kind: 'file', severity: SEVERITY_ERROR, remediation: 'Create AGENTS.md at the repository root with a concise agent map.' },
@@ -298,10 +300,102 @@ export async function checkCommands(root, options = {}) {
    return checkResult('commands', findings, summary);
 }
 
+const DEFAULT_STALE_THRESHOLD_DAYS = 30;
+
+async function listExecPlans(root, kind) {
+   const dir = path.join(root, 'docs/exec-plans', kind);
+   try {
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+      return entries
+         .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.md'))
+         .map((entry) => path.posix.join('docs/exec-plans', kind, entry.name))
+         .sort();
+   } catch (_error) {
+      return [];
+   }
+}
+
+export async function checkExecplans(root, options = {}) {
+   const thresholdDays = options.staleThresholdDays ?? DEFAULT_STALE_THRESHOLD_DAYS;
+   const findings = [];
+   const now = Math.floor(Date.now() / 1000);
+   const thresholdSeconds = thresholdDays * 86400;
+
+   const activePlans = await listExecPlans(root, 'active');
+   const completedPlans = await listExecPlans(root, 'completed');
+
+   for (const relpath of [ ...activePlans, ...completedPlans ]) {
+      const text = await readText(path.join(root, relpath));
+      const parsed = parseExecPlan(text);
+
+      for (const missing of parsed.missingSections) {
+         findings.push(finding(
+            SEVERITY_WARNING,
+            relpath,
+            `ExecPlan is missing required section \`${missing}\`.`,
+            `Add a \`## ${missing}\` section per skills/agentic-legibility/PLANS.md.`
+         ));
+      }
+   }
+
+   for (const relpath of activePlans) {
+      const text = await readText(path.join(root, relpath));
+      const parsed = parseExecPlan(text);
+      const timestamp = await lastActivityTimestamp(root, relpath);
+
+      if (timestamp !== null && now - timestamp > thresholdSeconds) {
+         const days = Math.floor((now - timestamp) / 86400);
+         findings.push(finding(
+            SEVERITY_WARNING,
+            relpath,
+            `Active ExecPlan has had no activity in ${days} days (threshold ${thresholdDays}).`,
+            'Update the Progress and Outcomes sections, or move the plan to docs/exec-plans/completed/.'
+         ));
+      }
+
+      if (parsed.progress.total > 0
+         && parsed.progress.remaining === 0
+         && parsed.presentSections.has('Outcomes & Retrospective')) {
+         const outcomesBodyPresent = text
+            .split(/^##\s+Outcomes\s*&\s*Retrospective\s*$/mu)[1]
+            ?.replace(/^##\s.*$/msu, '')
+            ?.trim();
+         if (!outcomesBodyPresent) {
+            findings.push(finding(
+               SEVERITY_WARNING,
+               relpath,
+               'Active ExecPlan has every progress checkbox completed but no Outcomes & Retrospective body.',
+               'Fill in Outcomes & Retrospective, then move the plan to docs/exec-plans/completed/.'
+            ));
+         }
+      }
+   }
+
+   for (const relpath of completedPlans) {
+      const text = await readText(path.join(root, relpath));
+      const parsed = parseExecPlan(text);
+      if (parsed.progress.remaining > 0) {
+         findings.push(finding(
+            SEVERITY_WARNING,
+            relpath,
+            `Completed ExecPlan still has ${parsed.progress.remaining} unchecked progress item${parsed.progress.remaining === 1 ? '' : 's'}.`,
+            'Either finish the remaining items or move the plan back to docs/exec-plans/active/.'
+         ));
+      }
+   }
+
+   const summary = findings.length === 0
+      ? `All ExecPlans healthy (${activePlans.length} active, ${completedPlans.length} completed).`
+      : `${findings.length} ExecPlan finding${findings.length === 1 ? '' : 's'} across ${activePlans.length} active and ${completedPlans.length} completed plans.`;
+
+   return checkResult('execplans', findings, summary);
+}
+
 export const AVAILABLE_CHECKS = {
    artifacts: checkArtifacts,
    links: checkLinks,
    commands: checkCommands,
+   execplans: checkExecplans,
 };
 
 export async function runAudit(root, selectedChecks) {
