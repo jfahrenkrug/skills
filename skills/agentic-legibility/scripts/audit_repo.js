@@ -11,6 +11,7 @@
 //
 // Subcommands (passed as --check-* flags):
 //   --check-artifacts   Verify required legibility paths exist.
+//   --check-links       Markdown link integrity + orphan-doc detection.
 //   --check-all         Run every available check and aggregate the results.
 //
 // Additional checks are added incrementally by later milestones of the
@@ -38,7 +39,13 @@ import {
    formatSingleCheckJson,
    formatSingleCheckMarkdown,
 } from './lib/output.js';
-import { isDirectory } from './lib/fs_walk.js';
+import { isDirectory, readText, walkRepo } from './lib/fs_walk.js';
+import {
+   isExternalHref,
+   parseMarkdown,
+   resolveReference,
+   splitHref,
+} from './lib/markdown.js';
 
 export const REQUIRED_ARTIFACTS = [
    { path: 'AGENTS.md', kind: 'file', severity: SEVERITY_ERROR, remediation: 'Create AGENTS.md at the repository root with a concise agent map.' },
@@ -86,8 +93,171 @@ export async function checkArtifacts(root) {
    return checkResult('artifacts', findings, summary);
 }
 
+const MARKDOWN_EXTENSIONS = new Set([ '.md', '.mdx' ]);
+const LINK_ENTRY_FILES = [ 'README.md', 'AGENTS.md', 'CLAUDE.md' ];
+
+function isMarkdownFile(relpath) {
+   const lower = relpath.toLowerCase();
+   for (const ext of MARKDOWN_EXTENSIONS) {
+      if (lower.endsWith(ext)) return true;
+   }
+   return false;
+}
+
+function normalizeRelativeHref(href) {
+   if (href.startsWith('./')) return href.slice(2);
+   return href;
+}
+
+function resolveLinkTarget(fromRelpath, href) {
+   const { target, anchor } = splitHref(href);
+   if (target === null) {
+      return { target: fromRelpath, anchor, originalHref: href };
+   }
+   const normalized = normalizeRelativeHref(target);
+   const fromDir = fromRelpath.includes('/') ? fromRelpath.slice(0, fromRelpath.lastIndexOf('/')) : '';
+   const joined = fromDir ? path.posix.join(fromDir, normalized) : normalized;
+   const resolved = path.posix.normalize(joined);
+   return { target: resolved, anchor, originalHref: href };
+}
+
+async function fileExistsInRepo(root, relpath) {
+   try {
+      const stat = await fs.stat(path.join(root, relpath));
+      return stat.isFile();
+   } catch (_error) {
+      return false;
+   }
+}
+
+function buildEntrySet(markdownPaths) {
+   const entrySet = new Set();
+   for (const relpath of markdownPaths) {
+      if (LINK_ENTRY_FILES.includes(relpath)) {
+         entrySet.add(relpath);
+         continue;
+      }
+      if (relpath === 'docs/README.md' || relpath === 'docs/index.md') {
+         entrySet.add(relpath);
+         continue;
+      }
+      const parts = relpath.split('/');
+      if (parts.length === 3 && parts[0] === 'docs' && (parts[2] === 'README.md' || parts[2] === 'index.md')) {
+         entrySet.add(relpath);
+      }
+   }
+   return entrySet;
+}
+
+export async function checkLinks(root, options = {}) {
+   const excludes = options.excludes || [];
+   const files = await walkRepo(root, excludes);
+   const markdownPaths = files.filter(isMarkdownFile).sort();
+   const findings = [];
+   const adjacency = new Map();
+
+   const parsedByFile = new Map();
+   for (const relpath of markdownPaths) {
+      const text = await readText(path.join(root, relpath));
+      parsedByFile.set(relpath, parseMarkdown(text));
+      adjacency.set(relpath, new Set());
+   }
+
+   for (const relpath of markdownPaths) {
+      const parsed = parsedByFile.get(relpath);
+      for (const link of parsed.links) {
+         const resolvedHref = resolveReference(link, parsed.referenceDefinitions);
+         if (resolvedHref === null) {
+            findings.push(finding(
+               SEVERITY_WARNING,
+               relpath,
+               `Unresolved reference link \`${link.text}\` (no definition in file).`,
+               'Add a matching `[label]: url` definition or change the link.',
+               link.line
+            ));
+            continue;
+         }
+         if (!resolvedHref || isExternalHref(resolvedHref)) {
+            continue;
+         }
+         const resolved = resolveLinkTarget(relpath, resolvedHref);
+         if (!resolved.target) continue;
+         if (resolved.target.startsWith('..')) {
+            continue;
+         }
+
+         const targetExists = await fileExistsInRepo(root, resolved.target);
+         if (!targetExists) {
+            findings.push(finding(
+               SEVERITY_ERROR,
+               relpath,
+               `Broken link to \`${resolvedHref}\` (target not found).`,
+               `Update the link or create the target file \`${resolved.target}\`.`,
+               link.line
+            ));
+            continue;
+         }
+
+         if (resolved.anchor && isMarkdownFile(resolved.target)) {
+            const targetParsed = parsedByFile.get(resolved.target) || parseMarkdown(await readText(path.join(root, resolved.target)));
+            const anchors = new Set(targetParsed.headings.map((h) => h.anchor).filter(Boolean));
+            if (!anchors.has(resolved.anchor)) {
+               findings.push(finding(
+                  SEVERITY_WARNING,
+                  relpath,
+                  `Broken anchor \`#${resolved.anchor}\` in \`${resolved.target}\` (no matching heading).`,
+                  `Update the anchor to match a heading in \`${resolved.target}\` or add the heading.`,
+                  link.line
+               ));
+            }
+         }
+
+         if (isMarkdownFile(resolved.target) && adjacency.has(resolved.target)) {
+            adjacency.get(relpath).add(resolved.target);
+         }
+      }
+   }
+
+   const entrySet = buildEntrySet(markdownPaths);
+   const reachable = new Set(entrySet);
+   const queue = Array.from(entrySet);
+   while (queue.length > 0) {
+      const current = queue.shift();
+      const neighbors = adjacency.get(current);
+      if (!neighbors) continue;
+      for (const neighbor of neighbors) {
+         if (!reachable.has(neighbor)) {
+            reachable.add(neighbor);
+            queue.push(neighbor);
+         }
+      }
+   }
+
+   for (const relpath of markdownPaths) {
+      if (!relpath.startsWith('docs/')) continue;
+      if (reachable.has(relpath)) continue;
+      findings.push(finding(
+         SEVERITY_WARNING,
+         relpath,
+         'Orphaned documentation file (not reachable from any index).',
+         'Link this file from docs/README.md or a parent-directory README, or delete it.'
+      ));
+   }
+
+   const brokenLinkCount = findings.filter((f) => f.message.startsWith('Broken link')).length;
+   const brokenAnchorCount = findings.filter((f) => f.message.startsWith('Broken anchor')).length;
+   const orphanCount = findings.filter((f) => f.message.startsWith('Orphaned')).length;
+   const unresolvedRefCount = findings.filter((f) => f.message.startsWith('Unresolved reference')).length;
+   const summary = findings.length === 0
+      ? 'No broken links, anchors, or orphaned docs.'
+      : `${brokenLinkCount} broken link${brokenLinkCount === 1 ? '' : 's'}, ${brokenAnchorCount} broken anchor${brokenAnchorCount === 1 ? '' : 's'}, ${orphanCount} orphan doc${orphanCount === 1 ? '' : 's'}${unresolvedRefCount > 0 ? `, ${unresolvedRefCount} unresolved reference${unresolvedRefCount === 1 ? '' : 's'}` : ''}.`;
+
+   return checkResult('links', findings, summary);
+}
+
 export const AVAILABLE_CHECKS = {
    artifacts: checkArtifacts,
+   links: checkLinks,
 };
 
 export async function runAudit(root, selectedChecks) {
