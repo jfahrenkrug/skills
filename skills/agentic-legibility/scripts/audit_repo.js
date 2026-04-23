@@ -41,6 +41,7 @@ import {
 } from './lib/output.js';
 import { isDirectory, readText, walkRepo } from './lib/fs_walk.js';
 import {
+   extractInlineCodeSpans,
    extractTaskReferences,
    isExternalHref,
    parseMarkdown,
@@ -391,11 +392,118 @@ export async function checkExecplans(root, options = {}) {
    return checkResult('execplans', findings, summary);
 }
 
+const AGENT_DOC_CANDIDATES = [
+   'AGENTS.md',
+   'CLAUDE.md',
+   '.github/copilot-instructions.md',
+];
+
+// Inline code must contain a path separator before we treat it as a repo
+// path.  Bare filenames like `SKILL.md` or `README.md` in prose are almost
+// always generic references to a convention, not a specific file.
+function looksLikePath(content) {
+   const trimmed = content.trim();
+   if (!trimmed || /\s/u.test(trimmed)) return false;
+   if (trimmed.startsWith('#')) return false;
+   if (/^https?:\/\//iu.test(trimmed)) return false;
+   if (/^[a-z][a-z0-9+.-]*:/iu.test(trimmed)) return false;
+   if (trimmed.startsWith('/')) return false;
+   if (!trimmed.includes('/')) return false;
+   return true;
+}
+
+async function repoPathExists(root, relpath) {
+   try {
+      await fs.stat(path.join(root, relpath));
+      return true;
+   } catch (_error) {
+      return false;
+   }
+}
+
+export async function checkAgentsMd(root, options = {}) {
+   const excludes = options.excludes || [];
+   const files = await walkRepo(root, excludes);
+   const surfaceByRunner = await collectTaskSurfaceByRunner(root, files);
+   const findings = [];
+   const checkedDocs = [];
+
+   for (const relpath of AGENT_DOC_CANDIDATES) {
+      const abs = path.join(root, relpath);
+      if (!(await fileExistsInRepo(root, relpath))) continue;
+      const text = await readText(abs);
+      if (!text) continue;
+      checkedDocs.push(relpath);
+
+      const parsed = parseMarkdown(text);
+
+      for (const link of parsed.links) {
+         const href = resolveReference(link, parsed.referenceDefinitions);
+         if (!href || isExternalHref(href)) continue;
+         const { target } = splitHref(href);
+         if (!target) continue;
+         const cleaned = target.startsWith('./') ? target.slice(2) : target;
+         if (cleaned.startsWith('..')) continue;
+         if (!(await repoPathExists(root, cleaned))) {
+            findings.push(finding(
+               SEVERITY_ERROR,
+               relpath,
+               `Agent doc links to \`${href}\` but the target does not exist.`,
+               `Update the link or create the target \`${cleaned}\`.`,
+               link.line
+            ));
+         }
+      }
+
+      for (const span of extractInlineCodeSpans(text)) {
+         if (!looksLikePath(span.content)) continue;
+         const candidate = span.content.trim();
+         if (candidate.startsWith('/') || candidate.startsWith('~')) continue;
+         const normalized = candidate.startsWith('./') ? candidate.slice(2) : candidate;
+         if (normalized.startsWith('..')) continue;
+         if (!(await repoPathExists(root, normalized))) {
+            findings.push(finding(
+               SEVERITY_ERROR,
+               relpath,
+               `Agent doc mentions \`${candidate}\` but the path does not exist.`,
+               `Remove the reference or create \`${normalized}\`.`,
+               span.line
+            ));
+         }
+      }
+
+      for (const ref of extractTaskReferences(text)) {
+         const known = surfaceByRunner[ref.runner];
+         if (!known) continue;
+         if (known.has(ref.token)) continue;
+         findings.push(finding(
+            SEVERITY_ERROR,
+            relpath,
+            `Agent doc names ${RUNNER_LABEL[ref.runner]} task \`${ref.token}\` but it is not defined in the task surface.`,
+            `Define \`${ref.token}\` in the ${RUNNER_LABEL[ref.runner]} task file or update the doc.`,
+            ref.line
+         ));
+      }
+   }
+
+   let summary;
+   if (checkedDocs.length === 0) {
+      summary = 'No agent docs found to audit.';
+   } else if (findings.length === 0) {
+      summary = `All paths and task commands in agent docs resolve (${checkedDocs.length} doc${checkedDocs.length === 1 ? '' : 's'} checked).`;
+   } else {
+      summary = `${findings.length} broken reference${findings.length === 1 ? '' : 's'} across ${checkedDocs.length} agent doc${checkedDocs.length === 1 ? '' : 's'}.`;
+   }
+
+   return checkResult('agents_md', findings, summary);
+}
+
 export const AVAILABLE_CHECKS = {
    artifacts: checkArtifacts,
    links: checkLinks,
    commands: checkCommands,
    execplans: checkExecplans,
+   agents_md: checkAgentsMd,
 };
 
 export async function runAudit(root, selectedChecks) {

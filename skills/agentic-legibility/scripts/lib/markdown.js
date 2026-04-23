@@ -222,6 +222,51 @@ export function extractCodeSnippets(text) {
    return snippets;
 }
 
+/**
+ * Walk Markdown text and return every inline-code span (``foo``) with its
+ * line number, skipping fenced code blocks entirely.  Intended for audit
+ * checks that need to inspect the content of prose-level backticks — for
+ * example verifying that ``scripts/foo.sh`` in AGENTS.md points at a real
+ * file.
+ *
+ * @param {string} text
+ * @returns {Array<{ content: string, line: number }>}
+ */
+export function extractInlineCodeSpans(text) {
+   const lines = text.split(/\r?\n/u);
+   const spans = [];
+   let inFence = false;
+   let fenceMarker = '';
+
+   for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index];
+      const lineNumber = index + 1;
+
+      if (inFence) {
+         if (isClosingFence(line, fenceMarker)) {
+            inFence = false;
+            fenceMarker = '';
+         }
+         continue;
+      }
+
+      const fenceMatch = line.match(FENCE_OPEN);
+      if (fenceMatch) {
+         inFence = true;
+         fenceMarker = fenceMatch[2];
+         continue;
+      }
+
+      const regex = /`([^`\n]+)`/gu;
+      let match;
+      while ((match = regex.exec(line)) !== null) {
+         spans.push({ content: match[1], line: lineNumber });
+      }
+   }
+
+   return spans;
+}
+
 const TASK_REFERENCE_PATTERNS = [
    { runner: 'npm', regex: /(?:^|[\s&;|(])(?:npm|pnpm|yarn|bun)\s+run(?:-script)?\s+([A-Za-z0-9_.:-]+)/gu },
    { runner: 'make', regex: /(?:^|[\s&;|(])make\s+([A-Za-z0-9_.:-]+)/gu },
