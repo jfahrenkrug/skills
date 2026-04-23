@@ -1,58 +1,25 @@
 #!/usr/bin/env node
 
-import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import {
+   DOC_EXTENSIONS,
+   readText,
+   isDirectory,
+   rel,
+   toPosix,
+   walkRepo,
+} from './lib/fs_walk.js';
+import {
+   MANIFEST_FILE_NAMES,
+   TASK_FILE_NAMES,
+   categorizeTaskSurface,
+   collectTaskSurface,
+} from './lib/task_surface.js';
 
-const IGNORED_DIRS = new Set([
-   '.git',
-   '.hg',
-   '.mypy_cache',
-   '.next',
-   '.nuxt',
-   '.pytest_cache',
-   '.svn',
-   '.turbo',
-   '.venv',
-   '.yarn',
-   '__pycache__',
-   'build',
-   'coverage',
-   'dist',
-   'node_modules',
-   'out',
-   'target',
-   'vendor',
-]);
-const DOC_EXTENSIONS = new Set([ '.md', '.mdx', '.rst', '.txt' ]);
-const MAX_TEXT_SIZE = 250_000;
 const MAX_EVIDENCE = 5;
 const ROOT_SCOPE = '.';
 const AGENT_DOC_NAMES = new Set([ 'agents.md', 'claude.md', 'copilot-instructions.md' ]);
 const ROOT_AGENT_DOC_PATHS = new Set([ 'AGENTS.md', 'CLAUDE.md', '.github/copilot-instructions.md' ]);
-const TASK_FILE_NAMES = new Set([ 'makefile', 'justfile', 'taskfile.yml', 'taskfile.yaml', 'package.json' ]);
-const MANIFEST_FILE_NAMES = new Set([
-   'build.gradle',
-   'build.gradle.kts',
-   'cargo.toml',
-   'gemfile',
-   'go.mod',
-   'mix.exs',
-   'package.json',
-   'pom.xml',
-   'pyproject.toml',
-   'requirements.txt',
-]);
-const TASK_FILE_PATTERNS = [
-   'Makefile',
-   'makefile',
-   'justfile',
-   'Justfile',
-   'Taskfile.yml',
-   'Taskfile.yaml',
-   'package.json',
-   '.cargo/config.toml',
-   '.cargo/config',
-];
 const CORE_DOC_NAMES = new Set([
    'agents.md',
    'claude.md',
@@ -89,250 +56,6 @@ const GENERIC_NESTED_SCOPE_SEGMENTS = [
    /^__tests__$/u,
    /^\.[a-z0-9_-]+$/u,
 ];
-
-function toPosix(value) {
-   return value.split(path.sep).join('/');
-}
-
-function rel(root, absolutePath) {
-   return toPosix(path.relative(root, absolutePath));
-}
-
-function escapeRegex(value) {
-   return value.replace(/[|\\{}()[\]^$+?.]/gu, '\\$&');
-}
-
-function globToRegExp(pattern) {
-   let result = '';
-
-   for (let index = 0; index < pattern.length; index += 1) {
-      const char = pattern[index];
-      const next = pattern[index + 1];
-
-      if (char === '*' && next === '*') {
-         result += '.*';
-         index += 1;
-      } else if (char === '*') {
-         result += '[^/]*';
-      } else if (char === '?') {
-         result += '.';
-      } else {
-         result += escapeRegex(char);
-      }
-   }
-
-   return new RegExp(`^${result}$`, 'u');
-}
-
-function matchesExclude(relpath, patterns) {
-   if (patterns.length === 0) {
-      return false;
-   }
-
-   return patterns.some((pattern) => {
-      const trimmed = pattern.replace(/\/+$/gu, '');
-
-      if (relpath === pattern || relpath.startsWith(`${trimmed}/`)) {
-         return true;
-      }
-
-      return globToRegExp(pattern).test(relpath);
-   });
-}
-
-async function readText(filePath) {
-   try {
-      const stat = await fs.stat(filePath);
-
-      if (stat.size > MAX_TEXT_SIZE) {
-         return '';
-      }
-
-      return await fs.readFile(filePath, 'utf8');
-   } catch (_error) {
-      return '';
-   }
-}
-
-async function isDirectory(targetPath) {
-   try {
-      return (await fs.stat(targetPath)).isDirectory();
-   } catch (_error) {
-      return false;
-   }
-}
-
-async function readDirEntries(targetPath) {
-   try {
-      return await fs.readdir(targetPath, { withFileTypes: true });
-   } catch (_error) {
-      return [];
-   }
-}
-
-async function walkRepo(root, excludes) {
-   const excludePatterns = excludes
-      .map((pattern) => pattern.trim().replace(/^\/+|\/+$/gu, ''))
-      .filter(Boolean);
-   const stack = [ root ];
-   const results = [];
-
-   while (stack.length > 0) {
-      const current = stack.pop();
-
-      if (!current) {
-         continue;
-      }
-
-      const entries = await readDirEntries(current);
-
-      for (const entry of entries) {
-         const absolutePath = path.join(current, entry.name);
-         const relpath = rel(root, absolutePath);
-
-         if (matchesExclude(relpath, excludePatterns)) {
-            continue;
-         }
-
-         if (entry.isDirectory()) {
-            if (!IGNORED_DIRS.has(entry.name)) {
-               stack.push(absolutePath);
-            }
-         } else {
-            results.push(relpath);
-         }
-      }
-   }
-
-   return results;
-}
-
-function findFiles(paths, ...patterns) {
-   return paths.filter((relpath) => {
-      const basename = path.posix.basename(relpath);
-
-      return patterns.some((pattern) => {
-         const matcher = globToRegExp(pattern);
-
-         return matcher.test(basename) || matcher.test(relpath);
-      });
-   });
-}
-
-async function readCandidates(paths, root, patterns) {
-   const selected = {};
-
-   for (const relpath of findFiles(paths, ...patterns)) {
-      selected[relpath] = await readText(path.join(root, relpath));
-   }
-
-   return selected;
-}
-
-function parsePackageScripts(text) {
-   try {
-      const parsed = JSON.parse(text);
-      const scripts = parsed.scripts;
-
-      if (!scripts || typeof scripts !== 'object' || Array.isArray(scripts)) {
-         return new Set();
-      }
-
-      return new Set(Object.keys(scripts).map((name) => String(name).trim()));
-   } catch (_error) {
-      return new Set();
-   }
-}
-
-function parseMakeTargets(text) {
-   const targets = new Set();
-
-   for (const line of text.split(/\r?\n/u)) {
-      if (line.startsWith('\t') || line.startsWith(' ')) {
-         continue;
-      }
-
-      const match = line.match(/^([A-Za-z0-9_.-]+):(?:\s|$)/u);
-
-      if (match && !match[1].startsWith('.')) {
-         targets.add(match[1]);
-      }
-   }
-
-   return targets;
-}
-
-function parseJustTargets(text) {
-   const targets = new Set();
-
-   for (const line of text.split(/\r?\n/u)) {
-      const match = line.match(/^([A-Za-z0-9_.-]+):(?:\s|$)/u);
-
-      if (match) {
-         targets.add(match[1]);
-      }
-   }
-
-   return targets;
-}
-
-function parseTaskfileTargets(text) {
-   const targets = new Set();
-   let inTasks = false;
-
-   for (const line of text.split(/\r?\n/u)) {
-      if (/^tasks:\s*$/u.test(line)) {
-         inTasks = true;
-         continue;
-      }
-
-      if (inTasks && /^[A-Za-z]/u.test(line)) {
-         break;
-      }
-
-      if (!inTasks) {
-         continue;
-      }
-
-      const match = line.match(/^\s{2,}([A-Za-z0-9_.-]+):\s*$/u);
-
-      if (match) {
-         targets.add(match[1]);
-      }
-   }
-
-   return targets;
-}
-
-function parseCargoAliases(text) {
-   const targets = new Set();
-   let inAlias = false;
-
-   for (const line of text.split(/\r?\n/u)) {
-      const stripped = line.trim();
-
-      if (!stripped || stripped.startsWith('#')) {
-         continue;
-      }
-
-      if (/^\[[^\]]+\]\s*$/u.test(stripped)) {
-         inAlias = stripped.toLowerCase() === '[alias]';
-         continue;
-      }
-
-      if (!inAlias) {
-         continue;
-      }
-
-      const match = stripped.match(/^([A-Za-z0-9_.:-]+)\s*=/u);
-
-      if (match) {
-         targets.add(match[1]);
-      }
-   }
-
-   return targets;
-}
 
 function normalizeScope(root, scope) {
    const scopePath = path.resolve(root, scope);
@@ -447,59 +170,7 @@ async function collectContext(root, excludes) {
       }
    }
 
-   const taskFiles = await readCandidates(files, root, TASK_FILE_PATTERNS);
-   const taskSurface = new Set();
-   const taskSurfaceFiles = new Set();
-   const entrypointFiles = [];
-
-   for (const [ relpath, text ] of Object.entries(taskFiles)) {
-      entrypointFiles.push(relpath);
-
-      const lower = relpath.toLowerCase();
-
-      if (lower.endsWith('package.json')) {
-         const scripts = parsePackageScripts(text);
-
-         for (const script of scripts) {
-            taskSurface.add(script);
-         }
-
-         if (scripts.size > 0) {
-            taskSurfaceFiles.add(relpath);
-         }
-      } else if (lower.endsWith('makefile')) {
-         const targets = parseMakeTargets(text);
-         taskSurfaceFiles.add(relpath);
-
-         for (const target of targets) {
-            taskSurface.add(target);
-         }
-      } else if (lower.endsWith('justfile')) {
-         const targets = parseJustTargets(text);
-         taskSurfaceFiles.add(relpath);
-
-         for (const target of targets) {
-            taskSurface.add(target);
-         }
-      } else if (lower.endsWith('.cargo/config.toml') || lower.endsWith('.cargo/config')) {
-         const aliases = parseCargoAliases(text);
-
-         for (const alias of aliases) {
-            taskSurface.add(alias);
-         }
-
-         if (aliases.size > 0) {
-            taskSurfaceFiles.add(relpath);
-         }
-      } else if (lower.endsWith('.yml') || lower.endsWith('.yaml')) {
-         const targets = parseTaskfileTargets(text);
-         taskSurfaceFiles.add(relpath);
-
-         for (const target of targets) {
-            taskSurface.add(target);
-         }
-      }
-   }
+   const surface = await collectTaskSurface(root, files);
 
    return {
       root,
@@ -507,100 +178,10 @@ async function collectContext(root, excludes) {
       relpaths,
       doc_paths: docs,
       doc_texts: docTexts,
-      task_surface: taskSurface,
-      task_surface_files: taskSurfaceFiles,
-      entrypoint_files: entrypointFiles,
+      task_surface: surface.task_surface,
+      task_surface_files: surface.task_surface_files,
+      entrypoint_files: surface.entrypoint_files,
    };
-}
-
-function categorizeTaskSurface(taskSurface) {
-   const categories = new Map();
-
-   function add(category, name) {
-      if (!categories.has(category)) {
-         categories.set(category, new Set());
-      }
-
-      categories.get(category).add(name);
-   }
-
-   for (const name of Array.from(taskSurface).sort()) {
-      const lower = name.toLowerCase();
-
-      if ([ 'setup', 'bootstrap', 'install', 'init' ].includes(lower)
-         || /^(setup|bootstrap|install|init):/u.test(lower)) {
-         add('setup', name);
-      }
-
-      if ([ 'dev', 'start', 'serve', 'tauri' ].includes(lower)
-         || /^(dev|start|serve):/u.test(lower)) {
-         add('dev', name);
-      }
-
-      if (lower === 'build' || /^(build|bundle|compile|package):/u.test(lower)) {
-         add('build', name);
-      }
-
-      if (lower === 'test'
-         || lower.startsWith('test:')
-         || [ 'integration', 'e2e', 'smoke' ].includes(lower)
-         || /^(integration|e2e|smoke):/u.test(lower)) {
-         add('test', name);
-      }
-
-      if ([ 'ci', 'check' ].includes(lower) || /^(ci|check):/u.test(lower)) {
-         add('check', name);
-      }
-
-      if ([ 'typecheck', 'type-check' ].includes(lower)
-         || /^(typecheck|type-check):/u.test(lower)) {
-         add('check', name);
-      }
-
-      if (lower === 'standards' || lower.startsWith('standards:')) {
-         add('lint', name);
-         add('check', name);
-      }
-
-      if (lower === 'lint'
-         || lower.startsWith('lint:')
-         || lower.endsWith(':lint')
-         || lower.includes(':lint:')) {
-         add('lint', name);
-      }
-
-      if ([ 'eslint', 'stylelint', 'markdownlint', 'commitlint', 'rust:lint' ].includes(lower)) {
-         add('lint', name);
-      }
-
-      if (/^(eslint|stylelint|markdownlint|commitlint|rust:lint):/u.test(lower)) {
-         add('lint', name);
-      }
-
-      if (/^(lint[-_])/u.test(lower) || lower.includes('clippy')) {
-         add('lint', name);
-      }
-
-      if (/(^|[:_-])fmt($|[:_-])/u.test(lower)) {
-         if (lower.includes('fix') || /^(fix[-_])/u.test(lower)) {
-            add('format', name);
-         } else {
-            add('lint', name);
-         }
-      }
-
-      if ([ 'format', 'fmt' ].includes(lower) || /^(format|fmt):/u.test(lower)) {
-         add('format', name);
-      }
-
-      if (lower.endsWith(':fix') || lower.includes(':fix:') || /^(fix[-_])/u.test(lower)) {
-         add('format', name);
-      }
-   }
-
-   return Object.fromEntries(Array.from(categories.entries(), ([ category, names ]) => {
-      return [ category, Array.from(names).sort() ];
-   }));
 }
 
 function discoverScopes(ctx) {
@@ -1170,7 +751,7 @@ function normalizeMetricNames(rawMetrics) {
    return names;
 }
 
-async function buildReport(root, excludes, selectedMetrics, scope) {
+export async function buildReport(root, excludes, selectedMetrics, scope) {
    const rootContext = await collectContext(root, excludes);
    const normalizedScope = scope ? normalizeScope(root, scope) : undefined;
    const [ evaluatedScope, discoveredScopes, scopeSelection ] = chooseScope(rootContext, normalizedScope);
@@ -1210,7 +791,7 @@ async function buildReport(root, excludes, selectedMetrics, scope) {
    return report;
 }
 
-function toMarkdown(report) {
+export function toMarkdown(report) {
    const lines = [
       '# Agentic Legibility Scorecard',
       '',
@@ -1266,7 +847,7 @@ function toMarkdown(report) {
    return lines.join('\n');
 }
 
-function parseCliArgs(argv) {
+export function parseCliArgs(argv) {
    const args = {
       repo: '.',
       format: 'json',
@@ -1339,6 +920,8 @@ function parseCliArgs(argv) {
    return args;
 }
 
+export { collectContext, discoverScopes, normalizeMetricNames, METRIC_NAMES };
+
 async function main() {
    const args = parseCliArgs(process.argv.slice(2));
 
@@ -1378,10 +961,27 @@ async function main() {
    }
 }
 
-try {
-   await main();
-} catch (error) {
-   const message = error instanceof Error ? error.message : String(error);
-   process.stderr.write(`${message}\n`);
-   process.exitCode = 1;
+const invokedAsMain = (() => {
+   const entry = process.argv[1];
+
+   if (!entry) {
+      return false;
+   }
+
+   try {
+      const entryUrl = new URL(`file://${path.resolve(entry)}`).href;
+      return import.meta.url === entryUrl;
+   } catch (_error) {
+      return false;
+   }
+})();
+
+if (invokedAsMain) {
+   try {
+      await main();
+   } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`${message}\n`);
+      process.exitCode = 1;
+   }
 }
