@@ -3,7 +3,7 @@ name: agentic-legibility
 description: Audit and improve a repository's agentic legibility — the docs, entrypoints, and structure that let coding agents bootstrap, navigate, validate, and work without tribal knowledge. Covers AGENTS.md, docs/, ExecPlans, and scoring.
 metadata:
   author: Johannes Fahrenkrug (https://springenwerk.com)
-allowed-tools: Bash(node ${CLAUDE_SKILL_DIR}/scripts/score_repo.js:*) Read Write Edit Glob Grep
+allowed-tools: Bash(node ${CLAUDE_SKILL_DIR}/scripts/legibility.js:*) Bash(node ${CLAUDE_SKILL_DIR}/scripts/score_repo.js:*) Bash(node ${CLAUDE_SKILL_DIR}/scripts/audit_repo.js:*) Read Write Edit Glob Grep
 ---
 
 # Agentic Legibility
@@ -57,26 +57,33 @@ Choose the workflow that matches the current need:
 
 ## Workflow Selection
 
-Choose the workflow using this precedence order:
+Run the artifacts audit first and let its output gate the workflow:
 
-1. Run **Initial setup** if any required legibility artifact is missing.
-2. Run **Maintenance** only if all required legibility artifacts already exist.
+```
+node <skill-dir>/scripts/legibility.js audit --check-artifacts /path/to/repo
+```
 
-Treat this as a hard gate. Do not choose Maintenance just because the repository has partial legibility infrastructure.
+The check returns a JSON report with `status: ok` or `status: drift` and one finding per missing required artifact. Apply this precedence:
 
-The required artifacts are:
+1. If `status` is `drift` (any required artifact is missing), run **Initial setup**.
+2. If `status` is `ok` (every required artifact exists), run **Maintenance**.
+
+Treat this as a hard gate. Do not choose Maintenance just because the repository has partial legibility infrastructure — the check is the source of truth.
+
+The required artifacts enforced by `--check-artifacts` are:
 
 - `AGENTS.md`
+- `CLAUDE.md`
 - `.agents/`
 - `.agents/PLANS.md`
 - `docs/`
 - `docs/exec-plans/`
-
-If even one item in that list is missing, the task is **Initial setup**.
+- `docs/exec-plans/active/`
+- `docs/exec-plans/completed/`
 
 ## First Step
 
-Before choosing a workflow, list the required artifact paths and mark each one as present or missing in your notes. Base workflow selection on that checklist, not on overall impression.
+Run `legibility audit --check-artifacts` before anything else. Base workflow selection on its `status` field and findings list, not on overall impression of the repository.
 
 ## Common Misclassification To Avoid
 
@@ -92,31 +99,28 @@ Both workflows use the same scoring tool and reference materials:
 - Scorecard rubric and recommendations: [references/scorecard-and-guidance.md](references/scorecard-and-guidance.md)
 - ExecPlans repo conventions: [references/execplans.md](references/execplans.md)
 
-## Audit Loop
+## Mechanical Audit Loop
 
-If this skill is vendored with `scripts/score_repo.js`, use that script to score the repository from repo-visible evidence only.
+`scripts/legibility.js` is the unified dispatcher. `<skill-dir>` is the directory containing this skill; in Claude Code it is `${CLAUDE_SKILL_DIR}`.
 
-Run it from the skill directory or by passing an absolute path, for example:
+Scoring (seven-dimension scorecard — bootstrap, task entrypoints, validation, lint, repo map, structured docs, decisions):
 
-- `node <skill-dir>/scripts/score_repo.js /path/to/repo`
-- `node <skill-dir>/scripts/score_repo.js /path/to/repo --format markdown`
-- `node <skill-dir>/scripts/score_repo.js /path/to/repo --scope client`
-- `node <skill-dir>/scripts/score_repo.js /path/to/repo --list-scopes`
-- `node <skill-dir>/scripts/score_repo.js /path/to/repo --metric agent_repo_map --metric structured_docs`
+- `node <skill-dir>/scripts/legibility.js score /path/to/repo`
+- `node <skill-dir>/scripts/legibility.js list-scopes /path/to/repo`
+- `node <skill-dir>/scripts/legibility.js list-metrics`
 
-`<skill-dir>` is the directory containing this skill. In Claude Code this is `${CLAUDE_SKILL_DIR}`. In other agents, substitute the path where the skill was vendored.
+Audit (deterministic, language-agnostic checks that return findings with `severity`, `path`, `line`, `message`, `remediation`):
 
-Use the script output to identify the next highest-leverage fixes. The seven scorecard dimensions are:
+- `--check-artifacts` — required legibility artifacts exist (gates workflow selection).
+- `--check-links` — broken Markdown links, anchors, and orphan docs under `docs/`.
+- `--check-commands` — Markdown references to task-runner commands not in the task surface.
+- `--check-execplans` — ExecPlan section coverage, progress, and staleness.
+- `--check-agents-md` — paths and task references named in root agent docs still resolve.
+- `--check-all` — aggregate report with top-level `status: ok | drift` and one section per check.
 
-- bootstrap self-sufficiency
-- task entrypoints
-- validation harness
-- lint and format gates
-- agent repo map
-- structured docs
-- decision records
+Exit codes: `0` ok, `1` drift, `2` invalid CLI. Maintenance begins with `legibility audit --check-all` and uses the findings' `remediation` fields as the to-do list.
 
-Use score changes to prioritize the next fixes, not as a substitute for judgment.
+Full schema and per-check finding families: [references/audit-checks.md](references/audit-checks.md).
 
 ## Quality Bar
 

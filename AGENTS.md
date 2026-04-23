@@ -21,4 +21,4 @@ node skills/agentic-legibility/scripts/score_repo.js /path/to/repo
 
 - Keep skill `SKILL.md` files under 100 lines; push detail into referenced sub-files.
 - Each skill should work across agent platforms, not just Claude Code.
-- Reference files go in `references/`, scripts in `scripts/`.
+- Within each skill, reference files live in a `references` subdirectory and scripts in a `scripts` subdirectory.

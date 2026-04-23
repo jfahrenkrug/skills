@@ -15,52 +15,53 @@ Legibility artifacts drift as code changes. Trigger a maintenance pass when:
 
 ## Maintenance Workflow
 
-1. **Re-score the repository.**
-   Run the scoring script and compare against the last known baseline. Focus on dimensions that dropped or stayed low.
+1. **Run the aggregate audit.**
+   Run `node <skill-dir>/scripts/legibility.js audit --check-all /path/to/repo --format markdown` and treat the findings — each with a `path`, `message`, and `remediation` — as the starting to-do list. Error-severity findings (missing artifacts, broken paths in agent docs) are blockers; warnings (broken anchors, orphan docs, unresolved task references, stale ExecPlans) are drift to clear.
 
-2. **Update the root agent map.**
-   Check that `AGENTS.md` still routes correctly. Remove references to deleted files or commands. Add pointers to new modules, commands, or docs that have appeared since the last pass.
+2. **Re-score the repository.**
+   Run `legibility score` and compare against the last known baseline. Focus on dimensions that dropped or stayed low.
 
-3. **Refresh the docs tree.**
-   Walk `docs/` and verify that indexes link to files that still exist and that new docs are indexed. Check cross-links between docs for broken references.
+3. **Work the findings.** For each category the audit surfaced:
+   - **artifacts** — restore the missing file or directory, or if it was intentionally removed, document why.
+   - **links** — fix the target, update the link, or delete the stale reference. For orphan docs, link from an index or remove the file.
+   - **commands** — align the doc with the task surface: either add the task to the task runner or rename the reference.
+   - **execplans** — complete the missing section, resume the stale plan, fill in Outcomes & Retrospective, or move the plan to `completed/`.
+   - **agents_md** — update or remove the broken path / command in `AGENTS.md` or `CLAUDE.md`.
 
-4. **Close out completed ExecPlans.**
+4. **Update the root agent map for new work.**
+   The audit covers drift against current state, not additions. Add pointers to new modules, commands, or docs that have appeared since the last pass.
+
+5. **Close out completed ExecPlans.**
    Move finished plans from `docs/exec-plans/active/` to `docs/exec-plans/completed/`. Verify that `Outcomes & Retrospective` is filled in. Update `docs/exec-plans/README.md`.
 
-5. **Review and update decision records.**
+6. **Review and update decision records.**
    Check whether any recent decisions are missing ADRs. Mark superseded decisions and add links to their replacements.
 
-6. **Update architecture docs.**
+7. **Update architecture docs.**
    If modules were added, renamed, or restructured, update the architecture map. Verify that documented dependency directions still match reality. Strengthen mechanical enforcement where gaps appeared.
 
-7. **Tighten mechanical enforcement.**
+8. **Tighten mechanical enforcement.**
    Review recent agent sessions or PR feedback for recurring mistakes. Apply the steering loop: update docs to prevent the mistake, then add a lint rule or structural test to catch it mechanically. See the [Mechanical Enforcement](setup.md#mechanical-enforcement) section in the setup guide.
 
-8. **Re-score and record the delta.**
-   Run the scoring script again to confirm improvements. Record the before/after scores in a commit message or decision record so trends are visible.
+9. **Re-run the audit and re-score.**
+   Run `legibility audit --check-all` again to confirm the findings list has shrunk. Run `legibility score` and record the before/after delta in a commit message or decision record so trends are visible.
 
 ## Doc Gardening Checks
 
-Run these checks to find docs that have drifted from the code:
+Most drift categories are covered mechanically by `legibility audit --check-all`:
 
-### Stale or Orphaned Docs
+- **Stale or orphaned docs** — `--check-links` finds files under `docs/` that are not reachable from any index, plus index entries pointing to files that no longer exist.
+- **Broken cross-links** — `--check-links` resolves every relative Markdown link and heading anchor.
+- **Docs referencing removed commands** — `--check-commands` and `--check-agents-md` surface task-runner references that no longer resolve.
 
-- Files in `docs/` not linked from any index.
-- Index entries that point to files that no longer exist.
-- Docs referencing commands, functions, or file paths that have been renamed or removed.
-
-### Missing Coverage
+What the audit does *not* cover (still requires manual inspection):
 
 - New modules or packages with no entry in the architecture map.
 - New task entrypoints not reflected in `AGENTS.md` or onboarding docs.
 - Recent ADRs missing from the decisions index.
+- Prose that is technically correct but semantically stale — e.g. architecture descriptions that have drifted from the code.
 
-### Cross-Link Integrity
-
-- Relative Markdown links that resolve to missing files.
-- Links to anchors or headings that no longer exist in the target file.
-
-Prefer automating these checks with a repo-local script or lint rule. A simple script that extracts Markdown links and verifies targets exist can catch most drift before it accumulates.
+Run the audit first; spend manual review budget on the gaps the audit cannot see.
 
 ## ExecPlan Lifecycle
 
@@ -77,9 +78,9 @@ Stale active plans — those with no progress updates for an extended period —
 
 Set up recurring maintenance so legibility does not degrade silently between manual passes.
 
-### Periodic Re-Scoring
+### Periodic Re-Scoring and Re-Auditing
 
-Schedule the scoring script to run on a regular cadence — weekly for active repositories, monthly for stable ones. Compare the output against the previous run and flag any dimension that dropped.
+Schedule both `legibility score` and `legibility audit --check-all` to run on a regular cadence — weekly for active repositories, monthly for stable ones. Compare score output against the previous run and flag any dimension that dropped. Compare audit output against a clean baseline (stored in the repo or in CI artifacts) and flag any new findings.
 
 This can be done through:
 
@@ -89,21 +90,23 @@ This can be done through:
 
 ### Doc Freshness Checks
 
-Add a scheduled job that checks for common drift signals:
+A single scheduled `legibility audit --check-all` covers the main drift signals:
 
-- Markdown links pointing to deleted files.
-- Index files that have not been updated since new docs were added.
-- `AGENTS.md` referencing commands that no longer exist in the task runner.
-- Active ExecPlans with no progress updates in the last 30 days.
+- Markdown links pointing to deleted files (`--check-links`).
+- `AGENTS.md` / `CLAUDE.md` referencing paths or commands that no longer exist (`--check-agents-md`).
+- Docs referencing task-runner commands not in the task surface (`--check-commands`).
+- Active ExecPlans with no activity in the last 30 days (`--check-execplans`, configurable via `--stale-threshold-days`).
+
+Wire the command into CI and surface `status: drift` as a failing check or a warning comment on PRs.
 
 ### Automated Doc Gardening
 
 For repositories with enough docs that manual gardening does not scale, schedule an agent task that:
 
-1. Runs the scoring script and identifies gaps.
-2. Scans for broken links, orphaned docs, and stale indexes.
+1. Runs `legibility score` and `legibility audit --check-all` and identifies gaps and findings.
+2. Uses each finding's `remediation` field as the concrete fix to apply.
 3. Opens a PR with targeted fixes — updated indexes, removed dead links, new entries for undocumented modules.
-4. Includes the before/after score delta in the PR description.
+4. Includes the before/after score delta and the audit finding-count delta in the PR description.
 
 Keep automated fixes conservative. The agent should fix mechanical issues like broken links and missing index entries. Substantive changes — rewriting architecture docs, adding new decision records — should be flagged for human review rather than auto-merged.
 
