@@ -15,7 +15,7 @@ You can see the work is effective by running the new CLI against a fixture repos
    * [x] (2026-04-23 08:55Z) Created feature branch `feat/mechanical-audit-checks` from `main`.
    * [x] (2026-04-23 08:55Z) Created repository-level `docs/exec-plans/active/` and `docs/exec-plans/completed/` directories.
    * [x] (2026-04-23 08:55Z) Authored this ExecPlan and wrote it to `docs/exec-plans/active/mechanical-audit-checks.md`.
-   * [x] (2026-04-23 09:20Z) Milestone 1 complete: shared library extracted, `node:test` harness wired up, score_repo.js regression-tested with byte-identical output on this repo. Commit 10dcf4f.
+   * [x] (2026-04-23 09:20Z) Milestone 1 complete: shared library extracted, `node:test` harness wired up, score_repo.js regression-tested with byte-identical output on this repo. Commit c8f0aaa.
    * [x] (2026-04-23 09:35Z) Milestone 2 complete: `audit_repo.js` with `--check-artifacts`, fixture scaffolding, unit + integration tests, documented output schema. Commit 2e1a0e8.
    * [x] (2026-04-23 09:50Z) Milestone 3 complete: `lib/markdown.js` link/anchor extraction, `--check-links` with orphan detection and anchor resolution, unit + integration tests. Commit f8a9e58.
    * [x] (2026-04-23 10:00Z) Milestone 4 complete: `--check-commands` extracts task references from Markdown across the common task runners and flags references that do not resolve against the task surface. Commit c2a1b15.
