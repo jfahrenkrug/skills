@@ -1,0 +1,45 @@
+name: legibility
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/legibility/**'
+      - 'skills/agentic-legibility/scripts/legibility.js'
+  pull_request:
+    paths:
+      - 'packages/legibility/**'
+      - 'skills/agentic-legibility/scripts/legibility.js'
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: typecheck
+        run: npm -w legibility run typecheck
+
+      - name: test
+        run: npm -w legibility test
+
+      - name: build
+        run: npm -w legibility run build
+
+      - name: verify-bundle
+        run: npm -w legibility run verify-bundle
+
+      - name: check bundle is committed
+        run: |
+          if ! git diff --exit-code skills/agentic-legibility/scripts/legibility.js; then
+            echo "ERROR: skills/agentic-legibility/scripts/legibility.js is out of date."
+            echo "Run: npm -w legibility run build"
+            exit 1
+          fi
