@@ -5,7 +5,8 @@
    "type": "module",
    "private": true,
    "scripts": {
-      "test": "node --test scripts/__tests__/*.test.js"
+      "build": "npm -w legibility run build",
+      "test": "npm -w legibility test"
    },
    "engines": {
       "node": ">=20"
