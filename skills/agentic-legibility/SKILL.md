@@ -3,7 +3,7 @@ name: agentic-legibility
 description: Audit and improve a repository's agentic legibility — the docs, entrypoints, and structure that let coding agents bootstrap, navigate, validate, and work without tribal knowledge. Covers AGENTS.md, docs/, ExecPlans, and scoring.
 metadata:
   author: Johannes Fahrenkrug (https://springenwerk.com)
-allowed-tools: Bash(node ${CLAUDE_SKILL_DIR}/scripts/legibility.js:*) Bash(node ${CLAUDE_SKILL_DIR}/scripts/score_repo.js:*) Bash(node ${CLAUDE_SKILL_DIR}/scripts/audit_repo.js:*) Read Write Edit Glob Grep
+allowed-tools: Bash(node ${CLAUDE_SKILL_DIR}/scripts/legibility.js:*) Read Write Edit Glob Grep
 ---
 
 # Agentic Legibility
@@ -134,3 +134,23 @@ The repository is legible when a fresh agent can:
 - follow a short path from root docs to detailed guidance
 
 If a fresh agent would need hidden context from a person or chat thread, the repo is still missing legibility infrastructure.
+
+## Adding a Language Adapter
+
+Language-specific task-runner parsing lives in `packages/legibility/src/languages/`. Each file exports one adapter that implements `LanguageAdapter` from `src/languages/types.ts`.
+
+**To add support for a new ecosystem** (e.g. `gradle`, `mix`, `rake`):
+
+1. Create `packages/legibility/src/languages/<ecosystem>.ts`:
+   - Set `id` to the runner name (used as key in `collectTaskSurfaceByRunner` output).
+   - Set `patterns` to the filenames/glob patterns that contain task definitions.
+   - Implement `detect(files)` — return `true` if any of `files` matches the ecosystem.
+   - Implement `collectTaskSurface(root, files)` — parse the task files and return `{ names, sourceFiles }`.
+
+2. Register the adapter in `packages/legibility/src/languages/index.ts` — add it to `ALL_ADAPTERS`.
+
+3. Add unit tests in `packages/legibility/tests/languages/adapters.test.ts`.
+
+4. Rebuild the bundle: `cd packages/legibility && npm run build`
+
+The rebuilt `skills/agentic-legibility/scripts/legibility.js` bundle is the artifact that ships with the skill. Commit it alongside the TypeScript source change.
