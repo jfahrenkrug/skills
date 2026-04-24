@@ -16,7 +16,7 @@ Legibility artifacts drift as code changes. Trigger a maintenance pass when:
 ## Maintenance Workflow
 
 1. **Run the aggregate audit.**
-   Run `node <skill-dir>/scripts/legibility.js audit --check-all /path/to/repo --format markdown` and treat the findings — each with a `path`, `message`, and `remediation` — as the starting to-do list. Error-severity findings (missing artifacts, broken paths in agent docs) are blockers; warnings (broken anchors, orphan docs, unresolved task references, stale ExecPlans) are drift to clear.
+   Run `node scripts/legibility.js audit --check-all /path/to/repo --format markdown` and treat the findings — each with a `path`, `message`, and `remediation` — as the starting to-do list. Error-severity findings (missing artifacts, broken paths in agent docs) are blockers; warnings (broken anchors, orphan docs, unresolved task references, stale ExecPlans) are drift to clear.
 
 2. **Re-score the repository.**
    Run `legibility score` and compare against the last known baseline. Focus on dimensions that dropped or stayed low.

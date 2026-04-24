@@ -1,9 +1,11 @@
 ---
 name: agentic-legibility
-description: Audit and improve a repository's agentic legibility — the docs, entrypoints, and structure that let coding agents bootstrap, navigate, validate, and work without tribal knowledge. Covers AGENTS.md, docs/, ExecPlans, and scoring.
+description: Use when the user asks to improve a repository's agentic legibility, set up AGENTS.md or CLAUDE.md, make a repo agent-friendly, score or re-score a repo, garden stale docs, or update agent-facing documentation after architectural changes — even if they don't say "agentic legibility" by name. Trigger on phrases like "score this repo", "the architecture changed, update AGENTS.md", "set up docs for agents", "check if the docs are still current", "add an ExecPlan", or any request to make a codebase workable for fresh coding agents without tribal knowledge. Covers AGENTS.md/CLAUDE.md, docs/ structure, ExecPlans, decision records, and mechanical audit checks.
+compatibility: Requires Node.js 20+
 metadata:
   author: Johannes Fahrenkrug (https://springenwerk.com)
-allowed-tools: Bash(node ${CLAUDE_SKILL_DIR}/scripts/legibility.js:*) Read Write Edit Glob Grep
+  version: "0.2.0"
+allowed-tools: Bash(node scripts/legibility.js:*) Read Write Edit Glob Grep
 ---
 
 # Agentic Legibility
@@ -60,7 +62,7 @@ Choose the workflow that matches the current need:
 Run the artifacts audit first and let its output gate the workflow:
 
 ```
-node <skill-dir>/scripts/legibility.js audit --check-artifacts /path/to/repo
+node scripts/legibility.js audit --check-artifacts /path/to/repo
 ```
 
 The check returns a JSON report with `status: ok` or `status: drift` and one finding per missing required artifact. Apply this precedence:
@@ -93,21 +95,22 @@ Custom or legacy structures do not satisfy the required-artifact check unless th
 
 When the repository contains a near-miss structure such as `.agent/` instead of `.agents/PLANS.md`, treat that as evidence for migration or integration work under **Initial setup**, not as justification for **Maintenance**.
 
-Both workflows use the same scoring tool and reference materials:
+Both workflows use the same scoring tool and reference materials. Load each file only when the condition applies:
 
-- ExecPlans specification: [PLANS.md](PLANS.md)
-- Scorecard rubric and recommendations: [references/scorecard-and-guidance.md](references/scorecard-and-guidance.md)
-- ExecPlans repo conventions: [references/execplans.md](references/execplans.md)
+- [PLANS.md](PLANS.md) — load when authoring, reviewing, or validating an ExecPlan; contains the section-by-section specification.
+- [references/scorecard-and-guidance.md](references/scorecard-and-guidance.md) — load when applying the seven-dimension scorecard, interpreting a score report, or explaining a recommendation to the user.
+- [references/execplans.md](references/execplans.md) — load when deciding where ExecPlans live in the repo, how they move between `active/` and `completed/`, or how they are indexed.
+- [references/audit-checks.md](references/audit-checks.md) — load when you need the full finding schema, severities, or remediation families for a specific `--check-*` flag.
 
 ## Mechanical Audit Loop
 
-`scripts/legibility.js` is the unified dispatcher. `<skill-dir>` is the directory containing this skill; in Claude Code it is `${CLAUDE_SKILL_DIR}`.
+`scripts/legibility.js` is the unified dispatcher. Paths in the commands below are relative to the skill directory; the agent resolves them automatically.
 
 Scoring (seven-dimension scorecard — bootstrap, task entrypoints, validation, lint, repo map, structured docs, decisions):
 
-- `node <skill-dir>/scripts/legibility.js score /path/to/repo`
-- `node <skill-dir>/scripts/legibility.js list-scopes /path/to/repo`
-- `node <skill-dir>/scripts/legibility.js list-metrics`
+- `node scripts/legibility.js score /path/to/repo`
+- `node scripts/legibility.js list-scopes /path/to/repo`
+- `node scripts/legibility.js list-metrics`
 
 Audit (deterministic, language-agnostic checks that return findings with `severity`, `path`, `line`, `message`, `remediation`):
 

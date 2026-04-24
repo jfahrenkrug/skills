@@ -7,12 +7,12 @@ The `legibility.js` dispatcher exposes deterministic, language-agnostic audit ch
 All checks are run through the top-level dispatcher:
 
 ```
-node <skill-dir>/scripts/legibility.js audit --check-<name> /path/to/repo
-node <skill-dir>/scripts/legibility.js audit --check-all /path/to/repo
-node <skill-dir>/scripts/legibility.js audit --check-all --format markdown /path/to/repo
+node scripts/legibility.js audit --check-<name> /path/to/repo
+node scripts/legibility.js audit --check-all /path/to/repo
+node scripts/legibility.js audit --check-all --format markdown /path/to/repo
 ```
 
-`<skill-dir>` is the directory containing the skill. In Claude Code this is `${CLAUDE_SKILL_DIR}`.
+Paths are relative to the skill directory; the agent resolves them automatically.
 
 Exit codes:
 

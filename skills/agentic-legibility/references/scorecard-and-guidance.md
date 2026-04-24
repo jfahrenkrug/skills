@@ -8,7 +8,7 @@ This note consolidates actionable repository-legibility guidance extracted from:
 
 Use it as a local reference when improving a repository. Do not depend on external context during the task.
 
-When this skill is present locally, the audit entrypoint is `scripts/score_repo.js`.
+When this skill is present locally, the audit entrypoint is `scripts/legibility.js`.
 
 ## Working Principles
 
@@ -156,7 +156,7 @@ The build-hours `24-api-codex` example reinforces these patterns:
 
 - a vendorable `agentic-legibility` skill
 - a seven-dimension scorecard with repo-visible evidence only
-- a local scoring script at `scripts/score_repo.js`
+- a local scoring script at `scripts/legibility.js`
 - nested scope detection for repos with strong subtrees such as `client/` or `server/`
 - concrete recommendations phrased as “add a file, add a command, add an index, add a rule”
 
