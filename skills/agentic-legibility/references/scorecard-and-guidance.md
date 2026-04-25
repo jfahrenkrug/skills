@@ -20,7 +20,7 @@ When this skill is present locally, the audit entrypoint is `scripts/legibility.
 - Keep plans and decisions in version control.
 - Make bootstrap, validation, and diagnostics discoverable through stable repo entrypoints.
 
-## Seven Repo-Visible Scoring Dimensions
+## Eight Repo-Visible Scoring Dimensions
 
 ### Bootstrap self-sufficiency
 
@@ -67,6 +67,25 @@ Strong signals:
 - `lint`, `fmt`, or `format` entrypoints
 - repo-local CI or pre-commit checks
 
+### Guardrails and hooks
+
+Measure whether mechanical enforcement keeps agents from reproducing the same mistakes. The community wisdom is "make the agent's bad habits impossible, not forbidden."
+
+Strong signals (grouped into four families):
+
+- **pre-commit** — `.pre-commit-config.yaml` or `.pre-commit-config.yml`.
+- **lefthook** — `lefthook.yml`, `lefthook.yaml`, or `.lefthook.yml`.
+- **husky / githooks** — files under `.husky/` or `.githooks/`.
+- **agent hooks** — files under `.claude/hooks/`.
+
+Calibration:
+
+- 3 — at least two families present (strong layered enforcement).
+- 2 — exactly one family present.
+- 0 — no family present.
+
+This dimension complements `Lint and format gates`: that one rewards configs and named lint commands; this one rewards the *execution* of those checks at commit and tool boundaries.
+
 ### Agent repo map
 
 Measure whether the repo contains a concise navigation aid for agents.
@@ -77,6 +96,7 @@ Strong signals:
 - root `CLAUDE.md`
 - `.github/copilot-instructions.md`
 - short contributor guidance that links commands, docs, and constraints
+- a one-screen architecture index at `docs/repo-map.md`, `docs/architecture.md`, or `ARCHITECTURE.md` (also rewarded by `--check-repo-map`)
 
 Scoring note:
 

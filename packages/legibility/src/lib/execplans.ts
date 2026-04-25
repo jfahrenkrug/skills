@@ -32,6 +32,26 @@ export interface ParsedExecPlan {
    presentSections: Set<string>;
    missingSections: string[];
    progress: ExecPlanProgress;
+   sectionBodies: Record<string, string>;
+}
+
+function extractSectionBodies(text: string, headingTexts: string[]): Record<string, string> {
+   const bodies: Record<string, string> = {};
+   const lines = text.split(/\r?\n/u);
+   const headingLines: Array<{ index: number; text: string }> = [];
+   for (let i = 0; i < lines.length; i += 1) {
+      const m = lines[i].match(/^##\s+(.*?)\s*#*\s*$/u);
+      if (m) {
+         headingLines.push({ index: i, text: m[1] });
+      }
+   }
+   for (let i = 0; i < headingLines.length; i += 1) {
+      const start = headingLines[i].index + 1;
+      const end = i + 1 < headingLines.length ? headingLines[i + 1].index : lines.length;
+      const body = lines.slice(start, end).join('\n').trim();
+      bodies[headingLines[i].text.trim()] = body;
+   }
+   return bodies;
 }
 
 export function parseExecPlan(text: string): ParsedExecPlan {
@@ -61,10 +81,13 @@ export function parseExecPlan(text: string): ParsedExecPlan {
       }
    }
 
+   const sectionBodies = extractSectionBodies(text, headings.map((h) => h.text));
+
    return {
       headings: headings.map((h) => h.text),
       presentSections,
       missingSections,
       progress,
+      sectionBodies,
    };
 }

@@ -31,6 +31,7 @@ const METRIC_NAMES = [
    'task_entrypoints',
    'validation_harness',
    'lint_format_gates',
+   'guardrails_and_hooks',
    'agent_repo_map',
    'structured_docs',
    'decision_records',
@@ -553,6 +554,61 @@ async function scoreLintFormat(ctx: RepoContext): Promise<MetricResult> {
    return metric(0, 'high', evidence, 'No lint or format gates were detected.', 'Add at least one linter and formatter with explicit repo-level commands.');
 }
 
+async function scoreGuardrailsAndHooks(ctx: RepoContext): Promise<MetricResult> {
+   const families: Record<string, string[]> = {
+      'pre-commit': [],
+      lefthook: [],
+      'husky/githooks': [],
+      'agent-hooks': [],
+   };
+
+   for (const relpath of ctx.relpaths) {
+      if (relpath === '.pre-commit-config.yaml' || relpath === '.pre-commit-config.yml') {
+         families['pre-commit'].push(relpath);
+      }
+      if (relpath === 'lefthook.yml' || relpath === 'lefthook.yaml' || relpath === '.lefthook.yml') {
+         families.lefthook.push(relpath);
+      }
+      if (relpath.startsWith('.husky/') || relpath.startsWith('.githooks/')) {
+         families['husky/githooks'].push(relpath);
+      }
+      if (relpath.startsWith('.claude/hooks/')) {
+         families['agent-hooks'].push(relpath);
+      }
+   }
+
+   const presentFamilies = Object.entries(families).filter(([ , files ]) => files.length > 0);
+   const evidence = presentFamilies.flatMap(([ , files ]) => files).slice(0, MAX_EVIDENCE);
+
+   if (presentFamilies.length >= 2) {
+      return metric(
+         3,
+         'high',
+         evidence,
+         'The repository looks like it has layered mechanical enforcement.',
+         'Keep hook configs healthy and audit them when adding new tools.',
+      );
+   }
+
+   if (presentFamilies.length === 1) {
+      return metric(
+         2,
+         'high',
+         evidence,
+         'A single hooks family enforces guardrails; consider adding another for redundancy.',
+         'Add another layer such as `.pre-commit-config.yaml` or `lefthook.yml` so guardrails survive a missing local install.',
+      );
+   }
+
+   return metric(
+      0,
+      'high',
+      evidence,
+      'No mechanical hooks found.',
+      'Add `pre-commit`, `lefthook`, `husky`, or `.claude/hooks/` so common mistakes fail loudly before commit.',
+   );
+}
+
 async function scoreAgentRepoMap(ctx: RepoContext): Promise<MetricResult> {
    const repoWideAgentDocs = Array.from(ROOT_AGENT_DOC_PATHS)
       .filter((candidate) => ctx.relpaths.has(candidate))
@@ -579,9 +635,12 @@ async function scoreAgentRepoMap(ctx: RepoContext): Promise<MetricResult> {
       }
    }
 
-   const cues = [ 'command', 'setup', 'docs', 'architecture', 'test', 'constraint', 'workflow' ]
+   const cueMatches = [ 'command', 'setup', 'docs', 'architecture', 'test', 'constraint', 'workflow' ]
       .filter((token) => mapText.toLowerCase().includes(token))
       .length;
+   const repoMapBonus = [ 'docs/repo-map.md', 'docs/architecture.md', 'ARCHITECTURE.md' ]
+      .some((candidate) => ctx.relpaths.has(candidate)) ? 1 : 0;
+   const cues = cueMatches + repoMapBonus;
    const hasAgentDoc = repoWideAgentDocs.length > 0;
    const hasNestedAgentDoc = nestedAgentDocs.length > 0;
    const rootText = ROOT_MAP_DOCS
@@ -734,6 +793,7 @@ const METRIC_SCORERS: Record<MetricName, (ctx: RepoContext) => Promise<MetricRes
    task_entrypoints: scoreTaskEntrypoints,
    validation_harness: scoreValidationHarness,
    lint_format_gates: scoreLintFormat,
+   guardrails_and_hooks: scoreGuardrailsAndHooks,
    agent_repo_map: scoreAgentRepoMap,
    structured_docs: scoreStructuredDocs,
    decision_records: scoreDecisionRecords,

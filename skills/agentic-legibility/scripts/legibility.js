@@ -135,7 +135,7 @@ async function readCandidates(paths, root, patterns) {
   }
   return selected;
 }
-const PATTERNS$c = ["package.json"];
+const PATTERNS$g = ["package.json"];
 function parsePackageScripts(text) {
   try {
     const parsed = JSON.parse(text);
@@ -152,12 +152,12 @@ function parsePackageScripts(text) {
 const javascriptAdapter = {
   id: "javascript",
   displayName: "JavaScript / Node.js",
-  patterns: PATTERNS$c,
+  patterns: PATTERNS$g,
   detect(files) {
     return files.some((f) => f.toLowerCase().endsWith("package.json"));
   },
   async collectTaskSurface(root, files) {
-    const candidates = await readCandidates(files, root, PATTERNS$c);
+    const candidates = await readCandidates(files, root, PATTERNS$g);
     const names = /* @__PURE__ */ new Set();
     const sourceFiles = /* @__PURE__ */ new Set();
     for (const [relpath, text] of Object.entries(candidates)) {
@@ -168,7 +168,7 @@ const javascriptAdapter = {
     return { names, sourceFiles };
   }
 };
-const PATTERNS$b = ["Makefile", "makefile"];
+const PATTERNS$f = ["Makefile", "makefile"];
 function parseMakeTargets(text) {
   const targets = /* @__PURE__ */ new Set();
   for (const line of text.split(/\r?\n/u)) {
@@ -183,7 +183,7 @@ function parseMakeTargets(text) {
 const makeAdapter = {
   id: "make",
   displayName: "GNU Make",
-  patterns: PATTERNS$b,
+  patterns: PATTERNS$f,
   detect(files) {
     return files.some((f) => {
       const base = f.split("/").pop()?.toLowerCase();
@@ -191,7 +191,7 @@ const makeAdapter = {
     });
   },
   async collectTaskSurface(root, files) {
-    const candidates = await readCandidates(files, root, PATTERNS$b);
+    const candidates = await readCandidates(files, root, PATTERNS$f);
     const names = /* @__PURE__ */ new Set();
     const sourceFiles = /* @__PURE__ */ new Set();
     for (const [relpath, text] of Object.entries(candidates)) {
@@ -202,7 +202,7 @@ const makeAdapter = {
     return { names, sourceFiles };
   }
 };
-const PATTERNS$a = ["justfile", "Justfile"];
+const PATTERNS$e = ["justfile", "Justfile"];
 function parseJustTargets(text) {
   const targets = /* @__PURE__ */ new Set();
   for (const line of text.split(/\r?\n/u)) {
@@ -214,7 +214,7 @@ function parseJustTargets(text) {
 const justAdapter = {
   id: "just",
   displayName: "just",
-  patterns: PATTERNS$a,
+  patterns: PATTERNS$e,
   detect(files) {
     return files.some((f) => {
       const base = f.split("/").pop()?.toLowerCase();
@@ -222,7 +222,7 @@ const justAdapter = {
     });
   },
   async collectTaskSurface(root, files) {
-    const candidates = await readCandidates(files, root, PATTERNS$a);
+    const candidates = await readCandidates(files, root, PATTERNS$e);
     const names = /* @__PURE__ */ new Set();
     const sourceFiles = /* @__PURE__ */ new Set();
     for (const [relpath, text] of Object.entries(candidates)) {
@@ -233,7 +233,7 @@ const justAdapter = {
     return { names, sourceFiles };
   }
 };
-const PATTERNS$9 = ["Taskfile.yml", "Taskfile.yaml"];
+const PATTERNS$d = ["Taskfile.yml", "Taskfile.yaml"];
 function parseTaskfileTargets(text) {
   const targets = /* @__PURE__ */ new Set();
   let inTasks = false;
@@ -252,7 +252,7 @@ function parseTaskfileTargets(text) {
 const taskfileAdapter = {
   id: "task",
   displayName: "Task (go-task)",
-  patterns: PATTERNS$9,
+  patterns: PATTERNS$d,
   detect(files) {
     return files.some((f) => {
       const base = f.split("/").pop()?.toLowerCase();
@@ -260,7 +260,7 @@ const taskfileAdapter = {
     });
   },
   async collectTaskSurface(root, files) {
-    const candidates = await readCandidates(files, root, PATTERNS$9);
+    const candidates = await readCandidates(files, root, PATTERNS$d);
     const names = /* @__PURE__ */ new Set();
     const sourceFiles = /* @__PURE__ */ new Set();
     for (const [relpath, text] of Object.entries(candidates)) {
@@ -271,7 +271,7 @@ const taskfileAdapter = {
     return { names, sourceFiles };
   }
 };
-const PATTERNS$8 = [".cargo/config.toml", ".cargo/config"];
+const PATTERNS$c = [".cargo/config.toml", ".cargo/config"];
 function parseCargoAliases(text) {
   const targets = /* @__PURE__ */ new Set();
   let inAlias = false;
@@ -291,12 +291,12 @@ function parseCargoAliases(text) {
 const rustAdapter = {
   id: "cargo",
   displayName: "Rust / Cargo",
-  patterns: PATTERNS$8,
+  patterns: PATTERNS$c,
   detect(files) {
     return files.some((f) => f.toLowerCase().endsWith(".cargo/config.toml") || f.toLowerCase().endsWith(".cargo/config"));
   },
   async collectTaskSurface(root, files) {
-    const candidates = await readCandidates(files, root, PATTERNS$8);
+    const candidates = await readCandidates(files, root, PATTERNS$c);
     const names = /* @__PURE__ */ new Set();
     const sourceFiles = /* @__PURE__ */ new Set();
     for (const [relpath, text] of Object.entries(candidates)) {
@@ -307,7 +307,7 @@ const rustAdapter = {
     return { names, sourceFiles };
   }
 };
-const PATTERNS$7 = ["pyproject.toml", "setup.py", "tox.ini"];
+const PATTERNS$b = ["pyproject.toml", "setup.py", "tox.ini"];
 const SCRIPT_TABLE_PATTERNS = [
   /^\[project\.scripts\]\s*$/u,
   /^\[tool\.poetry\.scripts\]\s*$/u,
@@ -382,7 +382,7 @@ function splitEnvlist(raw) {
 const pythonAdapter = {
   id: "python",
   displayName: "Python",
-  patterns: PATTERNS$7,
+  patterns: PATTERNS$b,
   detect(files) {
     return files.some((f) => {
       const base = f.split("/").pop()?.toLowerCase();
@@ -390,7 +390,7 @@ const pythonAdapter = {
     });
   },
   async collectTaskSurface(root, files) {
-    const candidates = await readCandidates(files, root, PATTERNS$7);
+    const candidates = await readCandidates(files, root, PATTERNS$b);
     const names = /* @__PURE__ */ new Set();
     const sourceFiles = /* @__PURE__ */ new Set();
     for (const [relpath, text] of Object.entries(candidates)) {
@@ -408,7 +408,7 @@ const pythonAdapter = {
     return { names, sourceFiles };
   }
 };
-const PATTERNS$6 = ["build.gradle", "build.gradle.kts"];
+const PATTERNS$a = ["build.gradle", "build.gradle.kts"];
 const GROOVY_TASK = /(?:^|\n)\s*task\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:\([^)]*\))?\s*[{(<]/gu;
 const KOTLIN_REGISTER = /tasks\.register(?:<[^>]+>)?\s*\(\s*["']([^"']+)["']/gu;
 const KOTLIN_CREATE = /tasks\.create(?:<[^>]+>)?\s*\(\s*["']([^"']+)["']/gu;
@@ -427,7 +427,7 @@ function parseGradleTasks(text) {
 const gradleAdapter = {
   id: "gradle",
   displayName: "Gradle",
-  patterns: PATTERNS$6,
+  patterns: PATTERNS$a,
   detect(files) {
     return files.some((f) => {
       const base = f.split("/").pop()?.toLowerCase();
@@ -435,7 +435,7 @@ const gradleAdapter = {
     });
   },
   async collectTaskSurface(root, files) {
-    const candidates = await readCandidates(files, root, PATTERNS$6);
+    const candidates = await readCandidates(files, root, PATTERNS$a);
     const names = /* @__PURE__ */ new Set();
     const sourceFiles = /* @__PURE__ */ new Set();
     for (const [relpath, text] of Object.entries(candidates)) {
@@ -446,7 +446,7 @@ const gradleAdapter = {
     return { names, sourceFiles };
   }
 };
-const PATTERNS$5 = ["pom.xml"];
+const PATTERNS$9 = ["pom.xml"];
 const PROFILE_ID = /<profile>[\s\S]*?<id>\s*([A-Za-z0-9_.:-]+)\s*<\/id>/gu;
 const GOAL = /<goal>\s*([A-Za-z0-9_.:-]+)\s*<\/goal>/gu;
 function parseMavenGoals(text) {
@@ -463,12 +463,12 @@ function parseMavenGoals(text) {
 const mavenAdapter = {
   id: "maven",
   displayName: "Maven",
-  patterns: PATTERNS$5,
+  patterns: PATTERNS$9,
   detect(files) {
     return files.some((f) => f.split("/").pop()?.toLowerCase() === "pom.xml");
   },
   async collectTaskSurface(root, files) {
-    const candidates = await readCandidates(files, root, PATTERNS$5);
+    const candidates = await readCandidates(files, root, PATTERNS$9);
     const names = /* @__PURE__ */ new Set();
     const sourceFiles = /* @__PURE__ */ new Set();
     for (const [relpath, text] of Object.entries(candidates)) {
@@ -479,7 +479,7 @@ const mavenAdapter = {
     return { names, sourceFiles };
   }
 };
-const PATTERNS$4 = ["*.csproj", "*.fsproj", "*.vbproj"];
+const PATTERNS$8 = ["*.csproj", "*.fsproj", "*.vbproj"];
 const TARGET = /<Target\s+[^>]*\bName\s*=\s*"([^"]+)"/gu;
 function parseMsbuildTargets(text) {
   const names = /* @__PURE__ */ new Set();
@@ -497,12 +497,12 @@ function isProjectFile(path2) {
 const dotnetAdapter = {
   id: "dotnet",
   displayName: ".NET / MSBuild",
-  patterns: PATTERNS$4,
+  patterns: PATTERNS$8,
   detect(files) {
     return files.some(isProjectFile);
   },
   async collectTaskSurface(root, files) {
-    const candidates = await readCandidates(files, root, PATTERNS$4);
+    const candidates = await readCandidates(files, root, PATTERNS$8);
     const names = /* @__PURE__ */ new Set();
     const sourceFiles = /* @__PURE__ */ new Set();
     for (const [relpath, text] of Object.entries(candidates)) {
@@ -513,7 +513,7 @@ const dotnetAdapter = {
     return { names, sourceFiles };
   }
 };
-const PATTERNS$3 = ["CMakeLists.txt"];
+const PATTERNS$7 = ["CMakeLists.txt"];
 const CUSTOM_TARGET = /\badd_custom_target\s*\(\s*([A-Za-z_][A-Za-z0-9_.-]*)/gu;
 const EXECUTABLE = /\badd_executable\s*\(\s*([A-Za-z_][A-Za-z0-9_.-]*)/gu;
 const LIBRARY = /\badd_library\s*\(\s*([A-Za-z_][A-Za-z0-9_.-]*)/gu;
@@ -531,12 +531,12 @@ function parseCmakeTargets(text) {
 const cmakeAdapter = {
   id: "cmake",
   displayName: "CMake",
-  patterns: PATTERNS$3,
+  patterns: PATTERNS$7,
   detect(files) {
     return files.some((f) => f.split("/").pop()?.toLowerCase() === "cmakelists.txt");
   },
   async collectTaskSurface(root, files) {
-    const candidates = await readCandidates(files, root, PATTERNS$3);
+    const candidates = await readCandidates(files, root, PATTERNS$7);
     const names = /* @__PURE__ */ new Set();
     const sourceFiles = /* @__PURE__ */ new Set();
     for (const [relpath, text] of Object.entries(candidates)) {
@@ -547,7 +547,7 @@ const cmakeAdapter = {
     return { names, sourceFiles };
   }
 };
-const PATTERNS$2 = ["composer.json"];
+const PATTERNS$6 = ["composer.json"];
 function parseComposerScripts(text) {
   const names = /* @__PURE__ */ new Set();
   let data;
@@ -567,12 +567,12 @@ function parseComposerScripts(text) {
 const composerAdapter = {
   id: "composer",
   displayName: "Composer",
-  patterns: PATTERNS$2,
+  patterns: PATTERNS$6,
   detect(files) {
     return files.some((f) => f.split("/").pop()?.toLowerCase() === "composer.json");
   },
   async collectTaskSurface(root, files) {
-    const candidates = await readCandidates(files, root, PATTERNS$2);
+    const candidates = await readCandidates(files, root, PATTERNS$6);
     const names = /* @__PURE__ */ new Set();
     const sourceFiles = /* @__PURE__ */ new Set();
     for (const [relpath, text] of Object.entries(candidates)) {
@@ -583,7 +583,7 @@ const composerAdapter = {
     return { names, sourceFiles };
   }
 };
-const PATTERNS$1 = ["Rakefile", "rakefile", "Rakefile.rb", "**/*.rake"];
+const PATTERNS$5 = ["Rakefile", "rakefile", "Rakefile.rb", "**/*.rake"];
 const NAMESPACE_OPEN = /^\s*namespace\s+:([A-Za-z_][A-Za-z0-9_]*)\s+do\b/u;
 const NAMESPACE_OPEN_STR = /^\s*namespace\s+["']([A-Za-z_][A-Za-z0-9_]*)["']\s+do\b/u;
 const TASK_SYM = /^\s*task\s+:([A-Za-z_][A-Za-z0-9_]*)\b/u;
@@ -635,7 +635,7 @@ function isRakeFile(relpath) {
 const rakeAdapter = {
   id: "rake",
   displayName: "rake",
-  patterns: PATTERNS$1,
+  patterns: PATTERNS$5,
   detect(files) {
     return files.some(isRakeFile);
   },
@@ -652,7 +652,7 @@ const rakeAdapter = {
     return { names, sourceFiles };
   }
 };
-const PATTERNS = [
+const PATTERNS$4 = [
   "**/xcshareddata/xcschemes/*.xcscheme",
   "Fastfile",
   "fastlane/Fastfile"
@@ -688,7 +688,7 @@ function isScheme(relpath) {
 const xcodeAdapter = {
   id: "xcode",
   displayName: "Xcode",
-  patterns: PATTERNS,
+  patterns: PATTERNS$4,
   detect(files) {
     return files.some((f) => isFastfile(f) || isScheme(f) || f.includes(".xcodeproj/"));
   },
@@ -711,6 +711,191 @@ const xcodeAdapter = {
     return { names, sourceFiles };
   }
 };
+const PATTERNS$3 = ["nx.json", "project.json"];
+function parseNxTargets(text) {
+  const names = /* @__PURE__ */ new Set();
+  try {
+    const parsed = JSON.parse(text);
+    if (typeof parsed !== "object" || parsed === null) return names;
+    const obj = parsed;
+    const targets = obj.targets;
+    if (targets && typeof targets === "object" && !Array.isArray(targets)) {
+      for (const key of Object.keys(targets)) {
+        names.add(key);
+      }
+    }
+    const targetDefaults = obj.targetDefaults;
+    if (targetDefaults && typeof targetDefaults === "object" && !Array.isArray(targetDefaults)) {
+      for (const key of Object.keys(targetDefaults)) {
+        names.add(key);
+      }
+    }
+  } catch (_error) {
+    return names;
+  }
+  return names;
+}
+const nxAdapter = {
+  id: "nx",
+  displayName: "Nx",
+  patterns: PATTERNS$3,
+  detect(files) {
+    return files.some((f) => {
+      const base = f.split("/").pop()?.toLowerCase();
+      return base === "nx.json" || base === "project.json";
+    });
+  },
+  async collectTaskSurface(root, files) {
+    const candidates = await readCandidates(files, root, PATTERNS$3);
+    const names = /* @__PURE__ */ new Set();
+    const sourceFiles = /* @__PURE__ */ new Set();
+    for (const [relpath, text] of Object.entries(candidates)) {
+      const parsed = parseNxTargets(text);
+      for (const n of parsed) names.add(n);
+      if (parsed.size > 0) sourceFiles.add(relpath);
+    }
+    return { names, sourceFiles };
+  }
+};
+const PATTERNS$2 = ["turbo.json"];
+function parseTurboTasks(text) {
+  const names = /* @__PURE__ */ new Set();
+  try {
+    const parsed = JSON.parse(text);
+    if (typeof parsed !== "object" || parsed === null) return names;
+    const obj = parsed;
+    for (const key of ["pipeline", "tasks"]) {
+      const value = obj[key];
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        for (const taskKey of Object.keys(value)) {
+          names.add(taskKey);
+          const hashIdx = taskKey.indexOf("#");
+          if (hashIdx !== -1) {
+            const stripped = taskKey.slice(hashIdx + 1);
+            if (stripped) names.add(stripped);
+          }
+        }
+      }
+    }
+  } catch (_error) {
+    return names;
+  }
+  return names;
+}
+const turboAdapter = {
+  id: "turbo",
+  displayName: "Turbo",
+  patterns: PATTERNS$2,
+  detect(files) {
+    return files.some((f) => f.split("/").pop()?.toLowerCase() === "turbo.json");
+  },
+  async collectTaskSurface(root, files) {
+    const candidates = await readCandidates(files, root, PATTERNS$2);
+    const names = /* @__PURE__ */ new Set();
+    const sourceFiles = /* @__PURE__ */ new Set();
+    for (const [relpath, text] of Object.entries(candidates)) {
+      const parsed = parseTurboTasks(text);
+      for (const n of parsed) names.add(n);
+      if (parsed.size > 0) sourceFiles.add(relpath);
+    }
+    return { names, sourceFiles };
+  }
+};
+const PATTERNS$1 = [".mise.toml", "mise.toml"];
+function parseMiseTasks(text) {
+  const names = /* @__PURE__ */ new Set();
+  const lines = text.split(/\r?\n/u);
+  for (const line of lines) {
+    const match = line.match(/^\s*\[tasks\.([A-Za-z0-9_:.-]+)\]\s*(?:#.*)?$/u);
+    if (match) {
+      names.add(match[1]);
+    }
+  }
+  const inlineTableSection = text.match(/^\s*\[tasks\]\s*$/mu);
+  if (inlineTableSection) {
+    const startIndex = inlineTableSection.index ?? 0;
+    const after = text.slice(startIndex).split(/\r?\n/u).slice(1);
+    for (const line of after) {
+      if (/^\s*\[/.test(line)) break;
+      const m = line.match(/^\s*([A-Za-z0-9_:.-]+)\s*=/u);
+      if (m) names.add(m[1]);
+    }
+  }
+  return names;
+}
+const miseAdapter = {
+  id: "mise",
+  displayName: "mise",
+  patterns: PATTERNS$1,
+  detect(files) {
+    return files.some((f) => {
+      const base = f.split("/").pop()?.toLowerCase();
+      return base === ".mise.toml" || base === "mise.toml";
+    });
+  },
+  async collectTaskSurface(root, files) {
+    const candidates = await readCandidates(files, root, PATTERNS$1);
+    const names = /* @__PURE__ */ new Set();
+    const sourceFiles = /* @__PURE__ */ new Set();
+    for (const [relpath, text] of Object.entries(candidates)) {
+      const parsed = parseMiseTasks(text);
+      for (const n of parsed) names.add(n);
+      if (parsed.size > 0) sourceFiles.add(relpath);
+    }
+    return { names, sourceFiles };
+  }
+};
+const PATTERNS = ["mix.exs"];
+const BUILTIN_MIX_TASKS = [
+  "compile",
+  "deps.get",
+  "deps.update",
+  "deps.compile",
+  "test",
+  "format",
+  "release",
+  "phx.server",
+  "phx.routes",
+  "ecto.create",
+  "ecto.migrate",
+  "ecto.rollback",
+  "run",
+  "new",
+  "help"
+];
+function deriveMixTaskName(relpath) {
+  const base = path.posix.basename(relpath);
+  if (!base.endsWith(".ex")) return null;
+  const stem = base.slice(0, -3);
+  if (!stem) return null;
+  return stem;
+}
+const mixAdapter = {
+  id: "mix",
+  displayName: "Mix (Elixir)",
+  patterns: PATTERNS,
+  detect(files) {
+    return files.some((f) => f.split("/").pop()?.toLowerCase() === "mix.exs");
+  },
+  async collectTaskSurface(_root, files) {
+    const names = /* @__PURE__ */ new Set();
+    const sourceFiles = /* @__PURE__ */ new Set();
+    const mixFiles = findFiles(files, "mix.exs");
+    if (mixFiles.length === 0) {
+      return { names, sourceFiles };
+    }
+    for (const t of BUILTIN_MIX_TASKS) names.add(t);
+    const taskFiles = files.filter((relpath) => {
+      return /(^|\/)lib\/mix\/tasks\/[^/]+\.ex$/u.test(relpath);
+    });
+    for (const taskFile of taskFiles) {
+      const name = deriveMixTaskName(taskFile);
+      if (name) names.add(name);
+    }
+    for (const f of mixFiles) sourceFiles.add(f);
+    return { names, sourceFiles };
+  }
+};
 const ALL_ADAPTERS = [
   javascriptAdapter,
   makeAdapter,
@@ -724,7 +909,11 @@ const ALL_ADAPTERS = [
   cmakeAdapter,
   composerAdapter,
   rakeAdapter,
-  xcodeAdapter
+  xcodeAdapter,
+  nxAdapter,
+  turboAdapter,
+  miseAdapter,
+  mixAdapter
 ];
 const TASK_FILE_PATTERNS = ALL_ADAPTERS.flatMap((a) => a.patterns);
 const TASK_FILE_NAMES = /* @__PURE__ */ new Set([
@@ -742,7 +931,13 @@ const TASK_FILE_NAMES = /* @__PURE__ */ new Set([
   "composer.json",
   "rakefile",
   "rakefile.rb",
-  "fastfile"
+  "fastfile",
+  "nx.json",
+  "project.json",
+  "turbo.json",
+  ".mise.toml",
+  "mise.toml",
+  "mix.exs"
 ]);
 const MANIFEST_FILE_NAMES = /* @__PURE__ */ new Set([
   "build.gradle",
@@ -760,7 +955,10 @@ const MANIFEST_FILE_NAMES = /* @__PURE__ */ new Set([
   "rakefile",
   "requirements.txt",
   "setup.py",
-  "tox.ini"
+  "tox.ini",
+  "nx.json",
+  "project.json",
+  "turbo.json"
 ]);
 async function collectAllTaskSurfaces(root, files) {
   const task_surface = /* @__PURE__ */ new Set();
@@ -858,6 +1056,7 @@ const METRIC_NAMES = [
   "task_entrypoints",
   "validation_harness",
   "lint_format_gates",
+  "guardrails_and_hooks",
   "agent_repo_map",
   "structured_docs",
   "decision_records"
@@ -1231,6 +1430,55 @@ async function scoreLintFormat(ctx) {
   }
   return metric(0, "high", evidence, "No lint or format gates were detected.", "Add at least one linter and formatter with explicit repo-level commands.");
 }
+async function scoreGuardrailsAndHooks(ctx) {
+  const families = {
+    "pre-commit": [],
+    lefthook: [],
+    "husky/githooks": [],
+    "agent-hooks": []
+  };
+  for (const relpath of ctx.relpaths) {
+    if (relpath === ".pre-commit-config.yaml" || relpath === ".pre-commit-config.yml") {
+      families["pre-commit"].push(relpath);
+    }
+    if (relpath === "lefthook.yml" || relpath === "lefthook.yaml" || relpath === ".lefthook.yml") {
+      families.lefthook.push(relpath);
+    }
+    if (relpath.startsWith(".husky/") || relpath.startsWith(".githooks/")) {
+      families["husky/githooks"].push(relpath);
+    }
+    if (relpath.startsWith(".claude/hooks/")) {
+      families["agent-hooks"].push(relpath);
+    }
+  }
+  const presentFamilies = Object.entries(families).filter(([, files]) => files.length > 0);
+  const evidence = presentFamilies.flatMap(([, files]) => files).slice(0, MAX_EVIDENCE);
+  if (presentFamilies.length >= 2) {
+    return metric(
+      3,
+      "high",
+      evidence,
+      "The repository looks like it has layered mechanical enforcement.",
+      "Keep hook configs healthy and audit them when adding new tools."
+    );
+  }
+  if (presentFamilies.length === 1) {
+    return metric(
+      2,
+      "high",
+      evidence,
+      "A single hooks family enforces guardrails; consider adding another for redundancy.",
+      "Add another layer such as `.pre-commit-config.yaml` or `lefthook.yml` so guardrails survive a missing local install."
+    );
+  }
+  return metric(
+    0,
+    "high",
+    evidence,
+    "No mechanical hooks found.",
+    "Add `pre-commit`, `lefthook`, `husky`, or `.claude/hooks/` so common mistakes fail loudly before commit."
+  );
+}
 async function scoreAgentRepoMap(ctx) {
   const repoWideAgentDocs = Array.from(ROOT_AGENT_DOC_PATHS).filter((candidate) => ctx.relpaths.has(candidate)).sort();
   const rootSupportDocs = Array.from(ctx.relpaths).filter((relpath) => ["CONTRIBUTING.md", "README.md"].includes(relpath)).sort();
@@ -1247,7 +1495,9 @@ async function scoreAgentRepoMap(ctx) {
       if (mapText) break;
     }
   }
-  const cues = ["command", "setup", "docs", "architecture", "test", "constraint", "workflow"].filter((token) => mapText.toLowerCase().includes(token)).length;
+  const cueMatches = ["command", "setup", "docs", "architecture", "test", "constraint", "workflow"].filter((token) => mapText.toLowerCase().includes(token)).length;
+  const repoMapBonus = ["docs/repo-map.md", "docs/architecture.md", "ARCHITECTURE.md"].some((candidate) => ctx.relpaths.has(candidate)) ? 1 : 0;
+  const cues = cueMatches + repoMapBonus;
   const hasAgentDoc = repoWideAgentDocs.length > 0;
   const hasNestedAgentDoc = nestedAgentDocs.length > 0;
   const rootText = ROOT_MAP_DOCS.map((candidate) => ctx.doc_texts[candidate] || "").join("\n").toLowerCase();
@@ -1356,6 +1606,7 @@ const METRIC_SCORERS = {
   task_entrypoints: scoreTaskEntrypoints,
   validation_harness: scoreValidationHarness,
   lint_format_gates: scoreLintFormat,
+  guardrails_and_hooks: scoreGuardrailsAndHooks,
   agent_repo_map: scoreAgentRepoMap,
   structured_docs: scoreStructuredDocs,
   decision_records: scoreDecisionRecords
@@ -1817,7 +2068,11 @@ const TASK_REFERENCE_PATTERNS = [
   { runner: "gradle", regex: /(?:^|[\s&;|(])(?:\.\/)?gradlew?\s+([A-Za-z0-9_.:-]+)/gu },
   { runner: "maven", regex: /(?:^|[\s&;|(])(?:mvn|mvnw|\.\/mvnw)\s+([A-Za-z0-9_.:-]+)/gu },
   { runner: "composer", regex: /(?:^|[\s&;|(])composer\s+(?:run(?:-script)?\s+)?([A-Za-z0-9_.:-]+)/gu },
-  { runner: "rake", regex: /(?:^|[\s&;|(])(?:bundle\s+exec\s+)?rake\s+([A-Za-z0-9_.:-]+)/gu }
+  { runner: "rake", regex: /(?:^|[\s&;|(])(?:bundle\s+exec\s+)?rake\s+([A-Za-z0-9_.:-]+)/gu },
+  { runner: "nx", regex: /(?:^|[\s&;|(])(?:npx\s+|pnpm\s+|yarn\s+)?nx\s+(?:run\s+)?([A-Za-z0-9_.:-]+)/gu },
+  { runner: "turbo", regex: /(?:^|[\s&;|(])(?:npx\s+|pnpm\s+|yarn\s+)?turbo\s+(?:run\s+)?([A-Za-z0-9_.:-]+)/gu },
+  { runner: "mise", regex: /(?:^|[\s&;|(])mise\s+run\s+([A-Za-z0-9_.:-]+)/gu },
+  { runner: "mix", regex: /(?:^|[\s&;|(])mix\s+([A-Za-z0-9_.:-]+)/gu }
 ];
 function isPlaceholderToken(token) {
   if (/^[A-Z]$/u.test(token)) return true;
@@ -1906,6 +2161,24 @@ const CHECKBOX_REGEX = /^\s*[*-]\s+\[([ xX])\]/u;
 function normalizeHeading(text) {
   return text.trim().replace(/\s+/gu, " ").toLowerCase();
 }
+function extractSectionBodies(text, headingTexts) {
+  const bodies = {};
+  const lines = text.split(/\r?\n/u);
+  const headingLines = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const m = lines[i].match(/^##\s+(.*?)\s*#*\s*$/u);
+    if (m) {
+      headingLines.push({ index: i, text: m[1] });
+    }
+  }
+  for (let i = 0; i < headingLines.length; i += 1) {
+    const start = headingLines[i].index + 1;
+    const end = i + 1 < headingLines.length ? headingLines[i + 1].index : lines.length;
+    const body = lines.slice(start, end).join("\n").trim();
+    bodies[headingLines[i].text.trim()] = body;
+  }
+  return bodies;
+}
 function parseExecPlan(text) {
   const { headings } = parseMarkdown(text);
   const presentHeadings = new Set(headings.map((h) => normalizeHeading(h.text)));
@@ -1929,11 +2202,13 @@ function parseExecPlan(text) {
       progress.remaining += 1;
     }
   }
+  const sectionBodies = extractSectionBodies(text, headings.map((h) => h.text));
   return {
     headings: headings.map((h) => h.text),
     presentSections,
     missingSections,
-    progress
+    progress,
+    sectionBodies
   };
 }
 const execFileAsync = promisify(execFile);
@@ -1972,7 +2247,7 @@ const REQUIRED_ARTIFACTS = [
   { path: "docs/exec-plans/completed", kind: "dir", severity: SEVERITY_WARNING, remediation: "Create `docs/exec-plans/completed/` to hold finished plans." },
   { path: "CLAUDE.md", kind: "file", severity: SEVERITY_WARNING, remediation: "Create CLAUDE.md containing `@AGENTS.md` to route Claude Code to the agent map." }
 ];
-async function pathExists(absolutePath, kind) {
+async function pathExists$1(absolutePath, kind) {
   try {
     const stat = await promises.stat(absolutePath);
     return kind === "dir" ? stat.isDirectory() : stat.isFile();
@@ -1981,19 +2256,27 @@ async function pathExists(absolutePath, kind) {
   }
 }
 async function checkArtifacts(root) {
-  const findings = [];
+  const rawFindings = [];
+  const presentPaths = /* @__PURE__ */ new Set();
   for (const artifact of REQUIRED_ARTIFACTS) {
     const absolutePath = path.join(root, artifact.path);
-    const exists = await pathExists(absolutePath, artifact.kind);
-    if (!exists) {
-      findings.push(finding(
-        artifact.severity,
-        artifact.path,
-        `Required legibility artifact missing (${artifact.kind}).`,
-        artifact.remediation
-      ));
+    const exists = await pathExists$1(absolutePath, artifact.kind);
+    if (exists) {
+      presentPaths.add(artifact.path);
+      continue;
     }
+    rawFindings.push(finding(
+      artifact.severity,
+      artifact.path,
+      `Required legibility artifact missing (${artifact.kind}).`,
+      artifact.remediation
+    ));
   }
+  const agentsMdPresent = presentPaths.has("AGENTS.md");
+  const findings = rawFindings.filter((f) => {
+    if (f.path === "CLAUDE.md" && agentsMdPresent) return false;
+    return true;
+  });
   const errorCount = findings.filter((f) => f.severity === SEVERITY_ERROR).length;
   const warningCount = findings.filter((f) => f.severity === SEVERITY_WARNING).length;
   const summary = findings.length === 0 ? "All required legibility artifacts are present." : `${errorCount} missing required artifact${errorCount === 1 ? "" : "s"}${warningCount > 0 ? `, ${warningCount} recommended artifact${warningCount === 1 ? "" : "s"} missing` : ""}.`;
@@ -2152,7 +2435,11 @@ const RUNNER_LABEL = {
   cmake: "CMake",
   composer: "Composer",
   rake: "rake",
-  xcode: "Xcode"
+  xcode: "Xcode",
+  nx: "Nx",
+  turbo: "Turbo",
+  mise: "mise",
+  mix: "Mix"
 };
 async function checkCommands(root, options = {}) {
   const excludes = options.excludes || [];
@@ -2212,7 +2499,8 @@ async function checkExecplans(root, options = {}) {
     const text = await readText(path.join(root, relpath));
     const parsed = parseExecPlan(text);
     const timestamp = await lastActivityTimestamp(root, relpath);
-    if (timestamp !== null && now - timestamp > thresholdSeconds) {
+    const isStale = timestamp !== null && now - timestamp > thresholdSeconds;
+    if (isStale) {
       const days = Math.floor((now - timestamp) / 86400);
       findings.push(finding(
         SEVERITY_WARNING,
@@ -2231,6 +2519,25 @@ async function checkExecplans(root, options = {}) {
           "Fill in Outcomes & Retrospective, then move the plan to docs/exec-plans/completed/."
         ));
       }
+    }
+    if (parsed.presentSections.has("Validation and Acceptance")) {
+      const body = parsed.sectionBodies["Validation and Acceptance"] ?? "";
+      if (!body.trim()) {
+        findings.push(finding(
+          SEVERITY_WARNING,
+          relpath,
+          "ExecPlan section `Validation and Acceptance` is empty.",
+          "Describe how a reader can verify the change works (commands to run, expected outputs, behaviors to observe)."
+        ));
+      }
+    }
+    if (isStale && parsed.progress.total > 0 && parsed.progress.remaining === 1) {
+      findings.push(finding(
+        SEVERITY_WARNING,
+        relpath,
+        "Active ExecPlan has a single unchecked task with no recent activity.",
+        "Either finish the remaining task or split it into smaller pieces and update Progress."
+      ));
     }
   }
   for (const relpath of completedPlans) {
@@ -2339,12 +2646,386 @@ async function checkAgentsMd(root, options = {}) {
   }
   return checkResult("agents_md", findings, summary);
 }
+const CROSS_TOOL_ALIAS_FILES = [
+  "CLAUDE.md",
+  ".github/copilot-instructions.md",
+  ".windsurfrules",
+  "GEMINI.md",
+  "CONVENTIONS.md"
+];
+const CROSS_TOOL_ALIAS_DIRS = [
+  ".cursor/rules"
+];
+function tokenizeAliasContent(text) {
+  const lines = text.split(/\r?\n/u);
+  const sentences = /* @__PURE__ */ new Set();
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.length >= 30) {
+      sentences.add(trimmed.toLowerCase());
+    }
+  }
+  return sentences;
+}
+function jaccardSimilarity(a, b) {
+  if (a.size === 0 && b.size === 0) return 1;
+  let intersection = 0;
+  for (const value of a) {
+    if (b.has(value)) intersection += 1;
+  }
+  const union = a.size + b.size - intersection;
+  if (union === 0) return 1;
+  return intersection / union;
+}
+function aliasIncludesAgentsMd(text) {
+  if (/@\.?\/?AGENTS\.md/u.test(text)) return true;
+  if (/^\s*read:\s*AGENTS\.md\s*$/mu.test(text)) return true;
+  if (/^\s*include:\s*AGENTS\.md\s*$/mu.test(text)) return true;
+  return false;
+}
+async function isSymlink(absolutePath) {
+  try {
+    const stat = await promises.lstat(absolutePath);
+    return stat.isSymbolicLink();
+  } catch (_error) {
+    return false;
+  }
+}
+async function listCursorRuleFiles(root) {
+  const dir = path.join(root, ".cursor", "rules");
+  try {
+    const entries = await promises.readdir(dir, { withFileTypes: true });
+    return entries.filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".mdc")).map((entry) => path.posix.join(".cursor/rules", entry.name)).sort();
+  } catch (_error) {
+    return [];
+  }
+}
+async function checkCrossToolAliases(root) {
+  const findings = [];
+  const agentsAbs = path.join(root, "AGENTS.md");
+  const agentsExists = await pathExists$1(agentsAbs, "file");
+  const agentsText = agentsExists ? await readText(agentsAbs) : "";
+  const agentsSentences = agentsExists ? tokenizeAliasContent(agentsText) : /* @__PURE__ */ new Set();
+  const aliasPaths = [];
+  for (const aliasPath of CROSS_TOOL_ALIAS_FILES) {
+    if (await pathExists$1(path.join(root, aliasPath), "file")) {
+      aliasPaths.push(aliasPath);
+    }
+  }
+  for (const cursorDir of CROSS_TOOL_ALIAS_DIRS) {
+    if (cursorDir === ".cursor/rules") {
+      aliasPaths.push(...await listCursorRuleFiles(root));
+    }
+  }
+  if (!agentsExists) {
+    if (aliasPaths.length >= 2) {
+      let largest = aliasPaths[0];
+      let largestSize = -1;
+      for (const aliasPath of aliasPaths) {
+        try {
+          const stat = await promises.stat(path.join(root, aliasPath));
+          if (stat.size > largestSize) {
+            largestSize = stat.size;
+            largest = aliasPath;
+          }
+        } catch (_error) {
+          continue;
+        }
+      }
+      findings.push(finding(
+        SEVERITY_WARNING,
+        largest,
+        "Multiple cross-tool agent docs but no canonical AGENTS.md.",
+        "Pick AGENTS.md as the source of truth and make the others symlinks or @AGENTS.md includes."
+      ));
+    }
+    const summary2 = findings.length === 0 ? "No AGENTS.md and no cross-tool aliases to compare." : `${findings.length} cross-tool alias issue${findings.length === 1 ? "" : "s"}.`;
+    return checkResult("cross_tool_aliases", findings, summary2);
+  }
+  for (const aliasPath of aliasPaths) {
+    const aliasAbs = path.join(root, aliasPath);
+    if (await isSymlink(aliasAbs)) continue;
+    const aliasText = await readText(aliasAbs);
+    if (!aliasText) continue;
+    if (aliasIncludesAgentsMd(aliasText)) continue;
+    if (aliasText === agentsText) continue;
+    const aliasSentences = tokenizeAliasContent(aliasText);
+    const similarity = jaccardSimilarity(agentsSentences, aliasSentences);
+    if (similarity < 0.5) {
+      findings.push(finding(
+        SEVERITY_WARNING,
+        aliasPath,
+        `Cross-tool alias \`${aliasPath}\` looks substantively different from AGENTS.md (similarity ${similarity.toFixed(2)}).`,
+        `Make \`${aliasPath}\` a symlink to AGENTS.md, or include AGENTS.md (e.g. \`@AGENTS.md\`).`
+      ));
+    }
+  }
+  const summary = findings.length === 0 ? `Cross-tool aliases consistent with AGENTS.md (${aliasPaths.length} alias${aliasPaths.length === 1 ? "" : "es"} checked).` : `${findings.length} cross-tool alias drift finding${findings.length === 1 ? "" : "s"} across ${aliasPaths.length} alias${aliasPaths.length === 1 ? "" : "es"}.`;
+  return checkResult("cross_tool_aliases", findings, summary);
+}
+const CONTEXT_BUDGET_DOCS = [
+  "AGENTS.md",
+  "CLAUDE.md",
+  ".github/copilot-instructions.md"
+];
+const CONTEXT_BUDGET_WARN_TOKENS = 4e3;
+const CONTEXT_BUDGET_ERROR_TOKENS = 8e3;
+async function checkContextBudget(root) {
+  const findings = [];
+  let checkedCount = 0;
+  for (const docPath of CONTEXT_BUDGET_DOCS) {
+    const abs = path.join(root, docPath);
+    if (!await pathExists$1(abs, "file")) continue;
+    checkedCount += 1;
+    const text = await readText(abs);
+    if (!text) continue;
+    const tokens = Math.ceil(text.length / 4);
+    if (tokens > CONTEXT_BUDGET_ERROR_TOKENS) {
+      findings.push(finding(
+        SEVERITY_ERROR,
+        docPath,
+        `Agent doc is approximately ${tokens} tokens (>${CONTEXT_BUDGET_ERROR_TOKENS}); agents typically read ≤ ${CONTEXT_BUDGET_WARN_TOKENS} efficiently.`,
+        "Trim the doc to a one-screen index; push detail into `docs/` and link from here.",
+        1
+      ));
+    } else if (tokens > CONTEXT_BUDGET_WARN_TOKENS) {
+      findings.push(finding(
+        SEVERITY_WARNING,
+        docPath,
+        `Agent doc is approximately ${tokens} tokens (>${CONTEXT_BUDGET_WARN_TOKENS}); consider trimming.`,
+        "Move detail into `docs/` and keep this file as a short index.",
+        1
+      ));
+    }
+  }
+  const summary = findings.length === 0 ? `Agent docs within context budget (${checkedCount} doc${checkedCount === 1 ? "" : "s"} checked).` : `${findings.length} agent doc${findings.length === 1 ? "" : "s"} exceeds the context budget.`;
+  return checkResult("context_budget", findings, summary);
+}
+async function checkReadmeDrift(root) {
+  const readmePath = path.join(root, "README.md");
+  const agentsPath = path.join(root, "AGENTS.md");
+  const readmeExists = await pathExists$1(readmePath, "file");
+  const agentsExists = await pathExists$1(agentsPath, "file");
+  if (!readmeExists || !agentsExists) {
+    return checkResult("readme_drift", [], "README.md or AGENTS.md absent; nothing to compare.");
+  }
+  const readmeText = await readText(readmePath);
+  const agentsText = await readText(agentsPath);
+  const readmeRefs = extractTaskReferences(readmeText);
+  const agentsRefs = extractTaskReferences(agentsText);
+  const byRunnerReadme = /* @__PURE__ */ new Map();
+  const byRunnerAgents = /* @__PURE__ */ new Map();
+  function addRef(map, runner, token, line) {
+    if (!map.has(runner)) map.set(runner, /* @__PURE__ */ new Map());
+    const inner = map.get(runner);
+    if (!inner.has(token)) inner.set(token, line);
+  }
+  for (const ref of readmeRefs) addRef(byRunnerReadme, ref.runner, ref.token, ref.line);
+  for (const ref of agentsRefs) addRef(byRunnerAgents, ref.runner, ref.token, ref.line);
+  const findings = [];
+  const sharedRunners = new Set(
+    Array.from(byRunnerReadme.keys()).filter((r) => byRunnerAgents.has(r))
+  );
+  for (const runner of sharedRunners) {
+    const readmeMap = byRunnerReadme.get(runner);
+    const agentsMap = byRunnerAgents.get(runner);
+    const runnerLabel = RUNNER_LABEL[runner] ?? runner;
+    for (const [token, line] of readmeMap.entries()) {
+      if (!agentsMap.has(token)) {
+        findings.push(finding(
+          SEVERITY_WARNING,
+          "README.md",
+          `README.md uses ${runnerLabel} task \`${token}\` but AGENTS.md does not mention it (drift).`,
+          "Align the two docs: either update AGENTS.md to match, or pick one canonical command and reference it from both.",
+          line
+        ));
+      }
+    }
+    for (const [token, line] of agentsMap.entries()) {
+      if (!readmeMap.has(token)) {
+        findings.push(finding(
+          SEVERITY_WARNING,
+          "AGENTS.md",
+          `AGENTS.md uses ${runnerLabel} task \`${token}\` but README.md does not mention it (drift).`,
+          "Align the two docs: either update README.md to match, or pick one canonical command and reference it from both.",
+          line
+        ));
+      }
+    }
+  }
+  const summary = findings.length === 0 ? "README.md and AGENTS.md describe the same tasks consistently." : `${findings.length} task drift finding${findings.length === 1 ? "" : "s"} between README.md and AGENTS.md.`;
+  return checkResult("readme_drift", findings, summary);
+}
+async function rootPackageJsonHasWorkspaces(root) {
+  const text = await readText(path.join(root, "package.json"));
+  if (!text) return false;
+  try {
+    const parsed = JSON.parse(text);
+    if (typeof parsed !== "object" || parsed === null) return false;
+    const ws = parsed.workspaces;
+    if (Array.isArray(ws) && ws.length > 0) return true;
+    if (ws && typeof ws === "object" && Array.isArray(ws.packages)) {
+      return ws.packages.length > 0;
+    }
+    return false;
+  } catch (_error) {
+    return false;
+  }
+}
+async function checkNesting(root, options = {}) {
+  const excludes = options.excludes || [];
+  const files = await walkRepo(root, excludes);
+  const hasPnpmWorkspaces = files.includes("pnpm-workspace.yaml") || files.includes("pnpm-workspace.yml");
+  const hasNxJson = files.includes("nx.json");
+  const projectJsonFiles = files.filter((f) => path.posix.basename(f) === "project.json");
+  const hasTurboJson = files.includes("turbo.json");
+  const rootHasWorkspaces = files.includes("package.json") && await rootPackageJsonHasWorkspaces(root);
+  const isMonorepo = hasPnpmWorkspaces || hasNxJson || hasTurboJson || rootHasWorkspaces || projectJsonFiles.length > 0;
+  if (!isMonorepo) {
+    return checkResult("nesting", [], "Not a monorepo; per-package AGENTS.md not required.");
+  }
+  const packageDirs = /* @__PURE__ */ new Set();
+  for (const projectJson of projectJsonFiles) {
+    const dir = path.posix.dirname(projectJson);
+    if (dir && dir !== ".") packageDirs.add(dir);
+  }
+  if (rootHasWorkspaces || hasPnpmWorkspaces || hasTurboJson) {
+    for (const file of files) {
+      if (path.posix.basename(file) === "package.json" && file !== "package.json") {
+        const dir = path.posix.dirname(file);
+        packageDirs.add(dir);
+      }
+    }
+  }
+  if (packageDirs.size === 0) {
+    return checkResult("nesting", [], "Monorepo detected but no package directories discovered.");
+  }
+  const findings = [];
+  const present = [];
+  const missing = [];
+  for (const dir of Array.from(packageDirs).sort()) {
+    const hasAgents = files.includes(`${dir}/AGENTS.md`);
+    const hasClaude = files.includes(`${dir}/CLAUDE.md`);
+    if (hasAgents || hasClaude) {
+      present.push(dir);
+    } else {
+      missing.push(dir);
+    }
+  }
+  const total = packageDirs.size;
+  const ratio = present.length / total;
+  const halfOrMore = ratio >= 0.5;
+  for (const dir of missing) {
+    const message = halfOrMore ? `Most workspace packages have AGENTS.md; consider adding one to \`${dir}\` for consistency.` : `Workspace package \`${dir}\` lacks AGENTS.md; subtree-specific guidance helps agents stay scoped.`;
+    findings.push(finding(
+      SEVERITY_WARNING,
+      dir,
+      message,
+      `Add \`${dir}/AGENTS.md\` describing the package's purpose, primary commands, and links to its docs.`
+    ));
+  }
+  const summary = findings.length === 0 ? `All ${total} workspace package${total === 1 ? "" : "s"} have a per-package agent doc.` : `${present.length}/${total} workspace package${total === 1 ? "" : "s"} have AGENTS.md; ${missing.length} missing.`;
+  return checkResult("nesting", findings, summary);
+}
+const REPO_MAP_CANDIDATES = [
+  "docs/repo-map.md",
+  "docs/architecture.md",
+  "ARCHITECTURE.md"
+];
+async function checkRepoMap(root) {
+  for (const candidate of REPO_MAP_CANDIDATES) {
+    if (await pathExists$1(path.join(root, candidate), "file")) {
+      return checkResult("repo_map", [], `Repo map found at \`${candidate}\`.`);
+    }
+  }
+  const findings = [finding(
+    SEVERITY_WARNING,
+    ".",
+    "No repo map found.",
+    "Add `docs/repo-map.md` or `ARCHITECTURE.md` describing module boundaries, allowed dependency directions, and where each subsystem lives."
+  )];
+  return checkResult("repo_map", findings, "No repo map found.");
+}
+function isAdrFile(relpath) {
+  const lower = relpath.toLowerCase();
+  if (!/(?:\.md|\.mdx)$/u.test(lower)) return false;
+  return /(^|\/)(adr|adrs|decisions?)\//u.test(lower);
+}
+async function checkAdrs(root, options = {}) {
+  const excludes = options.excludes || [];
+  const files = await walkRepo(root, excludes);
+  const adrFiles = files.filter(isAdrFile).sort();
+  if (adrFiles.length === 0) {
+    return checkResult("adrs", [], "No ADRs detected.");
+  }
+  const findings = [];
+  const adrDirs = new Set(adrFiles.map((f) => path.posix.dirname(f)));
+  for (const dir of adrDirs) {
+    const hasIndex = files.some((f) => {
+      const lower = f.toLowerCase();
+      return lower === `${dir.toLowerCase()}/readme.md` || lower === `${dir.toLowerCase()}/index.md`;
+    });
+    if (!hasIndex) {
+      findings.push(finding(
+        SEVERITY_WARNING,
+        dir,
+        "ADR directory has no index (`README.md` or `index.md`).",
+        `Add \`${dir}/README.md\` listing each ADR with title, date, and status.`
+      ));
+    }
+  }
+  for (const adrPath of adrFiles) {
+    const lower = path.posix.basename(adrPath).toLowerCase();
+    if (lower === "readme.md" || lower === "index.md") continue;
+    const text = await readText(path.join(root, adrPath));
+    if (!text) continue;
+    const parsed = parseMarkdown(text);
+    const headings = new Set(parsed.headings.map((h) => h.text.toLowerCase().trim()));
+    const sectionMatches = ["status", "context", "decision"].filter((name) => {
+      return Array.from(headings).some((h) => h === name || h.startsWith(`${name} `) || h.startsWith(`${name}:`));
+    }).length;
+    if (sectionMatches < 2) {
+      findings.push(finding(
+        SEVERITY_WARNING,
+        adrPath,
+        "ADR is missing standard sections (Status / Context / Decision).",
+        "Add headings for Status, Context, and Decision so the record is self-explanatory."
+      ));
+    }
+    const supersededMatch = text.match(/superseded\s+by[^\n]*\[([^\]]+)\]\(([^)\s]+)\)/iu);
+    if (supersededMatch) {
+      const href = supersededMatch[2];
+      if (!isExternalHref(href)) {
+        const resolved = resolveLinkTarget(adrPath, href);
+        if (resolved.target && !resolved.target.startsWith("..")) {
+          const exists = await fileExistsInRepo(root, resolved.target);
+          if (!exists) {
+            findings.push(finding(
+              SEVERITY_ERROR,
+              adrPath,
+              `ADR claims supersession by \`${href}\` but the target does not exist.`,
+              "Update the link to point at the actual successor ADR or remove the supersession claim."
+            ));
+          }
+        }
+      }
+    }
+  }
+  const summary = findings.length === 0 ? `All ${adrFiles.length} ADR${adrFiles.length === 1 ? "" : "s"} look healthy.` : `${findings.length} ADR finding${findings.length === 1 ? "" : "s"} across ${adrFiles.length} file${adrFiles.length === 1 ? "" : "s"}.`;
+  return checkResult("adrs", findings, summary);
+}
 const AVAILABLE_CHECKS = {
   artifacts: checkArtifacts,
   links: checkLinks,
   commands: checkCommands,
   execplans: checkExecplans,
-  agents_md: checkAgentsMd
+  agents_md: checkAgentsMd,
+  cross_tool_aliases: checkCrossToolAliases,
+  context_budget: checkContextBudget,
+  readme_drift: checkReadmeDrift,
+  nesting: checkNesting,
+  repo_map: checkRepoMap,
+  adrs: checkAdrs
 };
 async function runAudit(root, selectedChecks) {
   const results = {};
@@ -2426,6 +3107,138 @@ async function runCli(argv = process.argv.slice(2)) {
     process.exitCode = 1;
   }
 }
+const PLANS_TEMPLATE = '# Codex Execution Plans (ExecPlans)\n\nThis document describes the requirements for an execution plan\n("ExecPlan"), a design document that a coding agent can follow to\ndeliver a working feature or system change. Treat the reader as a\ncomplete beginner to this repository: they have only the current\nworking tree and the single ExecPlan file you provide. There is no\nmemory of prior plans and no external context.\n\n## How to use ExecPlans and PLANS.md\n\nWhen authoring an executable specification (ExecPlan), follow PLANS.md\nto the letter. If it is not in your context, refresh your memory by\nreading the entire PLANS.md file. Be thorough in reading and re-reading\nsource material to produce an accurate specification. When creating a\nspec, start from the skeleton and flesh it out as you do your research.\n\nIn this repository, store in-progress checked-in ExecPlans under\n`docs/exec-plans/active/`. When an ExecPlan is complete and its\n`Outcomes & Retrospective` section has been fully updated, move it to\n`docs/exec-plans/completed/` and update the relevant indexes so the\nactive and completed plan lists stay accurate.\n\nWhen implementing an executable specification (ExecPlan), do not prompt\nthe user for next steps; simply proceed to the next milestone. Keep all\nsections up to date, add or split entries in the list at every stopping\npoint to affirmatively state the progress made and next steps. Resolve\nambiguities autonomously, and commit frequently.\n\nWhen discussing an executable specification (ExecPlan), record\ndecisions in a log in the spec for posterity; it should be\nunambiguously clear why any change to the specification was made.\nExecPlans are living documents, and it should always be possible to\nrestart from only the ExecPlan and no other work.\n\nWhen researching a design with challenging requirements or significant\nunknowns, use milestones to implement proof of concepts, toy\nimplementations, and similar de-risking work that validates whether the\nproposal is feasible. Read the source code of libraries by finding or\nacquiring them, research deeply, and include prototypes to guide a\nfuller implementation.\n\n## Requirements\n\nNON-NEGOTIABLE REQUIREMENTS:\n\n   * Every ExecPlan must be fully self-contained. Self-contained means\n     that in its current form it contains all knowledge and\n     instructions needed for a novice to succeed.\n   * Every ExecPlan is a living document. Contributors are required to\n     revise it as progress is made, as discoveries occur, and as design\n     decisions are finalized. Each revision must remain fully\n     self-contained.\n   * Every ExecPlan must enable a complete novice to implement the\n     feature end-to-end without prior knowledge of this repo.\n   * Every ExecPlan must produce a demonstrably working behavior, not\n     merely code changes to meet a definition.\n   * Every ExecPlan must define every term of art in plain language or\n     do not use it.\n\nPurpose and intent come first. Begin by explaining, in a few sentences,\nwhy the work matters from a user\'s perspective: what someone can do\nafter this change that they could not do before, and how to see it\nworking. Then guide the reader through the exact steps to achieve that\noutcome, including what to edit, what to run, and what they should\nobserve.\n\nThe agent executing your plan can list files, read files, search, run\nthe project, and run tests. It does not know any prior context and\ncannot infer what you meant from earlier milestones. Repeat any\nassumption you rely on. Do not point to external blogs or docs; if\nknowledge is required, embed it in the plan itself in your own words.\nIf an ExecPlan builds upon a prior ExecPlan and that file is checked\nin, incorporate it by reference. If it is not, you must include all\nrelevant context from that plan.\n\n## Formatting\n\nFormat and envelope are simple and strict. Each ExecPlan must be one\nsingle fenced code block labeled as `md` that begins and ends with\ntriple backticks. Do not nest additional triple-backtick code fences\ninside; when you need to show commands, transcripts, diffs, or code,\npresent them as indented blocks within that single fence. Use\nindentation for clarity rather than code fences inside an ExecPlan to\navoid prematurely closing the ExecPlan\'s code fence. Use two newlines\nafter every heading, use `#`, `##`, and so on, and correct syntax for\nordered and unordered lists.\n\nWhen writing an ExecPlan to a Markdown (`.md`) file where the content of\nthe file is only the single ExecPlan, you should omit the triple\nbackticks.\n\nWrite in plain prose. Prefer sentences over lists. Avoid checklists,\ntables, and long enumerations unless brevity would obscure meaning.\nChecklists are permitted only in the `Progress` section, where they are\nmandatory. Narrative sections must remain prose-first.\n\n## Guidelines\n\nSelf-containment and plain language are paramount. If you introduce a\nphrase that is not ordinary English ("daemon", "middleware", "RPC\ngateway", "filter graph"), define it immediately and remind the reader\nhow it manifests in this repository, for example by naming the files or\ncommands where it appears. Do not say as defined previously or\naccording to the architecture doc. Include the needed explanation here,\neven if you repeat yourself.\n\nAvoid common failure modes. Do not rely on undefined jargon. Do not\ndescribe the letter of a feature so narrowly that the resulting code\ncompiles but does nothing meaningful. Do not outsource key decisions to\nthe reader. When ambiguity exists, resolve it in the plan itself and\nexplain why you chose that path. Err on the side of over-explaining\nuser-visible effects and under-specifying incidental implementation\ndetails.\n\nAnchor the plan with observable outcomes. State what the user can do\nafter implementation, the commands to run, and the outputs they should\nsee. Acceptance should be phrased as behavior a human can verify rather\nthan internal attributes. If a change is internal, explain how its\nimpact can still be demonstrated, for example by running tests that\nfail before and pass after, and by showing a scenario that uses the new\nbehavior.\n\nSpecify repository context explicitly. Name files with full\nrepository-relative paths, name functions and modules precisely, and\ndescribe where new files should be created. If touching multiple areas,\ninclude a short orientation paragraph that explains how those parts fit\ntogether so a novice can navigate confidently. When running commands,\nshow the working directory and exact command line. When outcomes depend\non environment, state the assumptions and provide alternatives when\nreasonable.\n\nBe idempotent and safe. Write the steps so they can be run multiple\ntimes without causing damage or drift. If a step can fail halfway,\ninclude how to retry or adapt. If a migration or destructive operation\nis necessary, spell out backups or safe fallbacks. Prefer additive,\ntestable changes that can be validated as you go.\n\nValidation is not optional. Include instructions to run tests, to start\nthe system if applicable, and to observe it doing something useful.\nDescribe comprehensive testing for any new features or capabilities.\nInclude expected outputs and error messages so a novice can tell\nsuccess from failure. Where possible, show how to prove that the change\nis effective beyond compilation, for example through a small end-to-end\nscenario, a CLI invocation, or an HTTP request and response transcript.\nState the exact test commands appropriate to the project\'s toolchain\nand how to interpret their results.\n\nCapture evidence. When your steps produce terminal output, short diffs,\nor logs, include them as indented examples. Keep them concise and\nfocused on what proves success. If you need to include a patch, prefer\nfile-scoped diffs or small excerpts that a reader can recreate by\nfollowing your instructions rather than pasting large blobs.\n\n## Milestones\n\nMilestones are narrative, not bureaucracy. If you break the work into\nmilestones, introduce each with a brief paragraph that describes the\nscope, what will exist at the end of the milestone that did not exist\nbefore, the commands to run, and the acceptance you expect to observe.\nKeep it readable as a story: goal, work, result, proof. Progress and\nmilestones are distinct: milestones tell the story, progress tracks\ngranular work. Both must exist. Never abbreviate a milestone merely for\nthe sake of brevity, and do not leave out details that could be crucial\nto a future implementation.\n\nEach milestone must be independently verifiable and incrementally\nimplement the overall goal of the execution plan.\n\n## Living plans and design decisions\n\n   * ExecPlans are living documents. As you make key design decisions,\n     update the plan to record both the decision and the thinking\n     behind it. Record all decisions in the `Decision Log` section.\n   * ExecPlans must contain and maintain a `Progress` section, a\n     `Surprises & Discoveries` section, a `Decision Log`, and an\n     `Outcomes & Retrospective` section. These are not optional.\n   * When you discover optimizer behavior, performance tradeoffs,\n     unexpected bugs, or similar findings that shaped your approach,\n     capture those observations in the `Surprises & Discoveries`\n     section with short evidence snippets. Test output is ideal.\n   * If you change course mid-implementation, document why in the\n     `Decision Log` and reflect the implications in `Progress`. Plans\n     are guides for the next contributor as much as checklists for you.\n   * At completion of a major task or the full plan, write an\n     `Outcomes & Retrospective` entry summarizing what was achieved,\n     what remains, and lessons learned.\n\n## Prototyping milestones and parallel implementations\n\nIt is acceptable, and often encouraged, to include explicit prototyping\nmilestones when they de-risk a larger change. Examples include adding a\nlow-level operator to a dependency to validate feasibility, or\nexploring two composition orders while measuring optimizer effects.\nKeep prototypes additive and testable. Clearly label the scope as\nprototyping, describe how to run and observe results, and state the\ncriteria for promoting or discarding the prototype. Prefer additive\ncode changes followed by subtractions that keep tests passing.\n\nParallel implementations, for example keeping an adapter alongside an\nolder path during migration, are fine when they reduce risk or enable\ntests to continue passing during a large migration. Describe how to\nvalidate both paths and how to retire one safely with tests. When\nworking with multiple new libraries or feature areas, consider creating\nspikes that evaluate the feasibility of those features independently,\nproving that the external library performs as expected and implements\nthe features needed in isolation.\n\n## Skeleton of a Good ExecPlan\n\n## <Short, action-oriented description>\n\nThis ExecPlan is a living document. The sections `Progress`,\n`Surprises & Discoveries`, `Decision Log`, and `Outcomes &\nRetrospective` must be kept up to date as work proceeds. If `PLANS.md`\nis checked into the repo, reference its repository-root path here and\nnote that this document must be maintained in accordance with it.\n\n## Purpose / Big Picture\n\nExplain in a few sentences what someone gains after this change and how\nthey can see it working. State the user-visible behavior you will\nenable.\n\n## Progress\n\nUse a list with checkboxes to summarize granular steps. Every stopping\npoint must be documented here, even if it requires splitting a\npartially completed task into two, such as completed versus remaining\nwork. This section must always reflect the actual current state of the\nwork.\n\n   * [x] (2025-10-01 13:00Z) Example completed step.\n   * [ ] Example incomplete step.\n   * [ ] Example partially completed step (completed: X; remaining: Y).\n\nUse timestamps to measure rates of progress.\n\n## Surprises & Discoveries\n\nDocument unexpected behaviors, bugs, optimizations, or insights\ndiscovered during implementation. Provide concise evidence.\n\n   * Observation: ... Evidence: ...\n\n## Decision Log\n\nRecord every decision made while working on the plan in the format:\n\n   * Decision: ... Rationale: ... Date/Author: ...\n\n## Outcomes & Retrospective\n\nSummarize outcomes, gaps, and lessons learned at major milestones or at\ncompletion. Compare the result against the original purpose.\n\n## Context and Orientation\n\nDescribe the current state relevant to this task as if the reader knows\nnothing. Name the key files and modules by full repository-relative\npath. Define any non-obvious term you will use. Do not refer to prior\nplans.\n\n## Plan of Work\n\nDescribe, in prose, the sequence of edits and additions. For each edit,\nname the file and location, such as the function or module, and what to\ninsert or change. Keep it concrete and minimal.\n\n## Concrete Steps\n\nState the exact commands to run and where to run them, including the\nworking directory. When a command generates output, show a short\nexpected transcript so the reader can compare. This section must be\nupdated as work proceeds.\n\n## Validation and Acceptance\n\nDescribe how to start or exercise the system and what to observe.\nPhrase acceptance as behavior, with specific inputs and outputs. If\ntests are involved, say to run the project\'s test command and describe\nwhat should pass, including any new test that fails before the change\nand passes after.\n\n## Idempotence and Recovery\n\nIf steps can be repeated safely, say so. If a step is risky, provide a\nsafe retry or rollback path. Keep the environment clean after\ncompletion.\n\n## Artifacts and Notes\n\nInclude the most important transcripts, diffs, or snippets as indented\nexamples. Keep them concise and focused on what proves success.\n\n## Interfaces and Dependencies\n\nBe prescriptive. Name the libraries, modules, and services to use and\nwhy. Specify the types, traits or interfaces, and function signatures\nthat must exist at the end of the milestone. Prefer stable names and\npaths such as `crate::module::function` or `package.submodule.Interface`.\n\nFor example:\n\n```rust\nIn crates/foo/planner.rs, define:\npub trait Planner {\n    fn plan(&self, observed: &Observed) -> Vec<Action>;\n}\n```\n\nIf you follow the guidance above, a single stateless agent, or a human\nnovice, can read your ExecPlan from top to bottom and produce a\nworking, observable result. That is the bar: self-contained,\nself-sufficient, novice-guiding, and outcome-focused.\n\nWhen you revise a plan, you must ensure your changes are comprehensively\nreflected across all sections, including the living document sections,\nand you must write a note at the bottom of the plan describing the\nchange and the reason why. ExecPlans must describe not just the what\nbut the why for almost everything.\n';
+const AGENTS_MD = [
+  "# Agents",
+  "",
+  "This file is the canonical entry point for AI coding agents working in",
+  "this repository. Keep it short — under one screen — and link out to",
+  "detail rather than inlining it. Other agent tools (Claude, Cursor,",
+  "Copilot, Gemini, Aider, Windsurf) read this file by convention; alias",
+  "files like `CLAUDE.md` should include or symlink to it rather than",
+  "duplicate its content.",
+  "",
+  "## Orientation",
+  "",
+  "- See [docs/README.md](docs/README.md) for a map of the docs tree.",
+  "- See [.agents/PLANS.md](.agents/PLANS.md) for ExecPlan conventions.",
+  "- Active execution plans live under `docs/exec-plans/active/`.",
+  "- Completed plans live under `docs/exec-plans/completed/`.",
+  "",
+  "## Primary commands",
+  "",
+  "Replace this list with the actual commands a fresh agent needs to",
+  "install dependencies, run tests, and start the project.",
+  "",
+  "- Install: _TODO_",
+  "- Test:    _TODO_",
+  "- Lint:    _TODO_",
+  "- Run:     _TODO_",
+  "",
+  "## Architecture",
+  "",
+  "Describe module boundaries and where each subsystem lives, or link to",
+  "a `docs/repo-map.md` / `ARCHITECTURE.md` file that does.",
+  "",
+  "## Working agreements",
+  "",
+  "- Follow the ExecPlan format described in `.agents/PLANS.md` for any",
+  "  non-trivial change.",
+  "- Keep this file updated as commands and architecture evolve — agents",
+  "  read it cold.",
+  ""
+].join("\n");
+const CLAUDE_MD = "@AGENTS.md\n";
+const DOCS_README = [
+  "# Documentation",
+  "",
+  "This directory holds long-form project documentation. Two conventions",
+  "matter most for AI coding agents:",
+  "",
+  "- `exec-plans/active/` — execution plans currently being worked on.",
+  "- `exec-plans/completed/` — finished plans, kept for posterity.",
+  "",
+  "The format and lifecycle of an ExecPlan is defined in",
+  "[../.agents/PLANS.md](../.agents/PLANS.md).",
+  "",
+  "## Suggested layout",
+  "",
+  "- `docs/repo-map.md` or `ARCHITECTURE.md` — one-screen architecture",
+  "  index covering module boundaries and allowed dependency directions.",
+  "- `docs/adr/` — architecture decision records, with a directory-local",
+  "  `README.md` index and consistent supersession links.",
+  ""
+].join("\n");
+function getTemplates() {
+  return [
+    { path: "AGENTS.md", contents: AGENTS_MD },
+    { path: "CLAUDE.md", contents: CLAUDE_MD },
+    { path: ".agents/PLANS.md", contents: PLANS_TEMPLATE },
+    { path: "docs/README.md", contents: DOCS_README },
+    { path: "docs/exec-plans/active/.gitkeep", contents: "" },
+    { path: "docs/exec-plans/completed/.gitkeep", contents: "" }
+  ];
+}
+async function pathExists(absPath) {
+  try {
+    await promises.access(absPath);
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+async function writeTemplate(root, template, force) {
+  const absPath = path.join(root, template.path);
+  if (!force && await pathExists(absPath)) {
+    return "skipped";
+  }
+  await promises.mkdir(path.dirname(absPath), { recursive: true });
+  await promises.writeFile(absPath, template.contents, "utf8");
+  return "created";
+}
+async function runInit(root, options = {}) {
+  const force = options.force === true;
+  const absRoot = path.resolve(root);
+  await promises.mkdir(absRoot, { recursive: true });
+  const created = [];
+  const skipped = [];
+  for (const template of getTemplates()) {
+    const outcome = await writeTemplate(absRoot, template, force);
+    if (outcome === "created") created.push(template.path);
+    else skipped.push(template.path);
+  }
+  return { root: absRoot, created, skipped };
+}
+async function runInitCli(argv) {
+  let force = false;
+  const positional = [];
+  for (const arg of argv) {
+    if (arg === "--force" || arg === "-f") {
+      force = true;
+    } else if (arg === "--help" || arg === "-h") {
+      process.stdout.write([
+        "Usage: legibility init [--force] [path]",
+        "",
+        "Scaffolds the required-artifact tree from templates: AGENTS.md,",
+        "CLAUDE.md, .agents/PLANS.md, docs/README.md, and the exec-plans",
+        "directories. Existing files are skipped unless --force is set.",
+        ""
+      ].join("\n"));
+      return;
+    } else if (arg.startsWith("--")) {
+      throw new Error(`Unknown flag for init: ${arg}`);
+    } else {
+      positional.push(arg);
+    }
+  }
+  if (positional.length > 1) {
+    throw new Error(`init takes at most one path argument, got ${positional.length}`);
+  }
+  const target = positional[0] ?? ".";
+  const result = await runInit(target, { force });
+  process.stdout.write(`${JSON.stringify(result, null, 2)}
+`);
+}
 const USAGE = [
   "Usage: legibility <subcommand> [options]",
   "",
@@ -2434,14 +3247,21 @@ const USAGE = [
   "  list-scopes <path>       List detected scopes in the repo.",
   "  list-metrics             List the available scoring metrics.",
   "  audit [flags] <path>     Run mechanical audit checks.",
+  "  init [--force] <path>    Scaffold AGENTS.md, CLAUDE.md, .agents/, docs/.",
   "",
   "Audit flags:",
-  "  --check-artifacts        Verify required legibility artifacts exist.",
-  "  --check-links            Find broken Markdown links, anchors, and orphan docs.",
-  "  --check-commands         Flag doc references to tasks not in the task surface.",
-  "  --check-execplans        Check ExecPlan sections, progress, and staleness.",
-  "  --check-agents-md        Validate paths and commands in root agent docs.",
-  "  --check-all              Run every audit check and emit an aggregate report.",
+  "  --check-artifacts            Verify required legibility artifacts exist.",
+  "  --check-links                Find broken Markdown links, anchors, and orphan docs.",
+  "  --check-commands             Flag doc references to tasks not in the task surface.",
+  "  --check-execplans            Check ExecPlan sections, progress, and staleness.",
+  "  --check-agents-md            Validate paths and commands in root agent docs.",
+  "  --check-cross-tool-aliases   Detect drift between AGENTS.md and tool-specific aliases.",
+  "  --check-context-budget       Warn when an agent doc exceeds the context budget.",
+  "  --check-readme-drift         Compare commands between README.md and AGENTS.md.",
+  "  --check-nesting              In monorepos, look for per-package AGENTS.md.",
+  "  --check-repo-map             Require a one-screen architecture index.",
+  "  --check-adrs                 Validate ADR sections, index, and supersession links.",
+  "  --check-all                  Run every audit check and emit an aggregate report.",
   "",
   "Shared flags:",
   "  --format json|markdown   Output format (default: json).",
@@ -2467,8 +3287,11 @@ async function runDispatcher(argv = process.argv.slice(2)) {
       return await runCli$1([...rest, "--list-metrics"]);
     case "audit":
       return await runCli(rest);
+    case "init":
+    case "generate-templates":
+      return await runInitCli(rest);
     default:
-      throw new Error(`Unknown subcommand: ${subcommand}. Valid: score, list-scopes, list-metrics, audit.`);
+      throw new Error(`Unknown subcommand: ${subcommand}. Valid: score, list-scopes, list-metrics, audit, init.`);
   }
 }
 const invokedAsMain = (() => {

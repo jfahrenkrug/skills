@@ -249,6 +249,10 @@ const TASK_REFERENCE_PATTERNS = [
    { runner: 'maven', regex: /(?:^|[\s&;|(])(?:mvn|mvnw|\.\/mvnw)\s+([A-Za-z0-9_.:-]+)/gu },
    { runner: 'composer', regex: /(?:^|[\s&;|(])composer\s+(?:run(?:-script)?\s+)?([A-Za-z0-9_.:-]+)/gu },
    { runner: 'rake', regex: /(?:^|[\s&;|(])(?:bundle\s+exec\s+)?rake\s+([A-Za-z0-9_.:-]+)/gu },
+   { runner: 'nx', regex: /(?:^|[\s&;|(])(?:npx\s+|pnpm\s+|yarn\s+)?nx\s+(?:run\s+)?([A-Za-z0-9_.:-]+)/gu },
+   { runner: 'turbo', regex: /(?:^|[\s&;|(])(?:npx\s+|pnpm\s+|yarn\s+)?turbo\s+(?:run\s+)?([A-Za-z0-9_.:-]+)/gu },
+   { runner: 'mise', regex: /(?:^|[\s&;|(])mise\s+run\s+([A-Za-z0-9_.:-]+)/gu },
+   { runner: 'mix', regex: /(?:^|[\s&;|(])mix\s+([A-Za-z0-9_.:-]+)/gu },
 ];
 
 function isPlaceholderToken(token: string): boolean {

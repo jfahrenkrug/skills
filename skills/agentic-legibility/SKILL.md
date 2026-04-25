@@ -98,7 +98,7 @@ When the repository contains a near-miss structure such as `.agent/` instead of 
 Both workflows use the same scoring tool and reference materials. Load each file only when the condition applies:
 
 - [PLANS.md](PLANS.md) — load when authoring, reviewing, or validating an ExecPlan; contains the section-by-section specification.
-- [references/scorecard-and-guidance.md](references/scorecard-and-guidance.md) — load when applying the seven-dimension scorecard, interpreting a score report, or explaining a recommendation to the user.
+- [references/scorecard-and-guidance.md](references/scorecard-and-guidance.md) — load when applying the eight-dimension scorecard, interpreting a score report, or explaining a recommendation to the user.
 - [references/execplans.md](references/execplans.md) — load when deciding where ExecPlans live in the repo, how they move between `active/` and `completed/`, or how they are indexed.
 - [references/audit-checks.md](references/audit-checks.md) — load when you need the full finding schema, severities, or remediation families for a specific `--check-*` flag.
 
@@ -106,7 +106,7 @@ Both workflows use the same scoring tool and reference materials. Load each file
 
 `scripts/legibility.js` is the unified dispatcher. Paths in the commands below are relative to the skill directory; the agent resolves them automatically.
 
-Scoring (seven-dimension scorecard — bootstrap, task entrypoints, validation, lint, repo map, structured docs, decisions):
+Scoring (eight-dimension scorecard — bootstrap, task entrypoints, validation, lint, guardrails and hooks, repo map, structured docs, decisions):
 
 - `node scripts/legibility.js score /path/to/repo`
 - `node scripts/legibility.js list-scopes /path/to/repo`
@@ -114,14 +114,24 @@ Scoring (seven-dimension scorecard — bootstrap, task entrypoints, validation, 
 
 Audit (deterministic, language-agnostic checks that return findings with `severity`, `path`, `line`, `message`, `remediation`):
 
-- `--check-artifacts` — required legibility artifacts exist (gates workflow selection).
+- `--check-artifacts` — required legibility artifacts exist (gates workflow selection). The `CLAUDE.md` warning is suppressed when `AGENTS.md` is present.
 - `--check-links` — broken Markdown links, anchors, and orphan docs under `docs/`.
 - `--check-commands` — Markdown references to task-runner commands not in the task surface.
-- `--check-execplans` — ExecPlan section coverage, progress, and staleness.
+- `--check-execplans` — ExecPlan section coverage (including non-empty `Validation and Acceptance` body), progress, and staleness.
 - `--check-agents-md` — paths and task references named in root agent docs still resolve.
+- `--check-cross-tool-aliases` — `.cursor/rules/*.mdc`, `.github/copilot-instructions.md`, `.windsurfrules`, `GEMINI.md`, `CONVENTIONS.md`, `CLAUDE.md` all stay in sync with `AGENTS.md`.
+- `--check-context-budget` — agent docs (`AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md`) stay under the rough 4000-token line agents read efficiently.
+- `--check-readme-drift` — same task-runner commands appear consistently in `README.md` and `AGENTS.md`.
+- `--check-nesting` — in monorepos (pnpm/turbo/nx/workspaces), per-package `AGENTS.md` files exist at workspace boundaries.
+- `--check-repo-map` — a one-screen architecture index exists at `docs/repo-map.md`, `docs/architecture.md`, or `ARCHITECTURE.md`.
+- `--check-adrs` — decision records have a directory-local index, standard sections, and consistent supersession links.
 - `--check-all` — aggregate report with top-level `status: ok | drift` and one section per check.
 
 Exit codes: `0` ok, `1` drift, `2` invalid CLI. Maintenance begins with `legibility audit --check-all` and uses the findings' `remediation` fields as the to-do list.
+
+Templates (Initial setup shortcut):
+
+- `node scripts/legibility.js init [--force] /path/to/repo` — scaffolds `AGENTS.md`, `CLAUDE.md` (`@AGENTS.md` include), `.agents/PLANS.md`, `docs/README.md`, and `docs/exec-plans/{active,completed}/`. Emits `{ created, skipped }` JSON. Existing files are skipped without `--force`. After `init`, `--check-artifacts` reports `status: ok`.
 
 Full schema and per-check finding families: [references/audit-checks.md](references/audit-checks.md).
 
@@ -142,7 +152,7 @@ If a fresh agent would need hidden context from a person or chat thread, the rep
 
 Language-specific task-runner parsing lives in `packages/legibility/src/languages/`. Each file exports one adapter that implements `LanguageAdapter` from `src/languages/types.ts`.
 
-The skill ships adapters for `javascript` (npm/pnpm/yarn/bun), `make`, `just`, `task` (Taskfile), `cargo`, `python` (pyproject.toml + tox.ini), `gradle`, `maven`, `dotnet` (MSBuild), `cmake`, `composer` (PHP), `rake` (Ruby/Rails), and `xcode` (xcschemes + Fastlane).
+The skill ships adapters for `javascript` (npm/pnpm/yarn/bun), `make`, `just`, `task` (Taskfile), `cargo`, `python` (pyproject.toml + tox.ini), `gradle`, `maven`, `dotnet` (MSBuild), `cmake`, `composer` (PHP), `rake` (Ruby/Rails), `xcode` (xcschemes + Fastlane), `nx`, `turbo`, `mise`, and `mix` (Elixir).
 
 **To add support for a new ecosystem** (e.g. `mix`, `bazel`, `pants`):
 

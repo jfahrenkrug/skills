@@ -53,21 +53,31 @@ async function pathExists(absolutePath: string, kind: 'file' | 'dir'): Promise<b
 }
 
 export async function checkArtifacts(root: string): Promise<CheckResult> {
-   const findings = [];
+   const rawFindings = [];
+   const presentPaths = new Set<string>();
 
    for (const artifact of REQUIRED_ARTIFACTS) {
       const absolutePath = path.join(root, artifact.path);
       const exists = await pathExists(absolutePath, artifact.kind);
 
-      if (!exists) {
-         findings.push(finding(
-            artifact.severity,
-            artifact.path,
-            `Required legibility artifact missing (${artifact.kind}).`,
-            artifact.remediation,
-         ));
+      if (exists) {
+         presentPaths.add(artifact.path);
+         continue;
       }
+
+      rawFindings.push(finding(
+         artifact.severity,
+         artifact.path,
+         `Required legibility artifact missing (${artifact.kind}).`,
+         artifact.remediation,
+      ));
    }
+
+   const agentsMdPresent = presentPaths.has('AGENTS.md');
+   const findings = rawFindings.filter((f) => {
+      if (f.path === 'CLAUDE.md' && agentsMdPresent) return false;
+      return true;
+   });
 
    const errorCount = findings.filter((f) => f.severity === SEVERITY_ERROR).length;
    const warningCount = findings.filter((f) => f.severity === SEVERITY_WARNING).length;
@@ -257,6 +267,10 @@ const RUNNER_LABEL: Record<string, string> = {
    composer: 'Composer',
    rake: 'rake',
    xcode: 'Xcode',
+   nx: 'Nx',
+   turbo: 'Turbo',
+   mise: 'mise',
+   mix: 'Mix',
 };
 
 export async function checkCommands(
@@ -340,9 +354,10 @@ export async function checkExecplans(
       const text = await readText(path.join(root, relpath));
       const parsed = parseExecPlan(text);
       const timestamp = await lastActivityTimestamp(root, relpath);
+      const isStale = timestamp !== null && now - timestamp > thresholdSeconds;
 
-      if (timestamp !== null && now - timestamp > thresholdSeconds) {
-         const days = Math.floor((now - timestamp) / 86400);
+      if (isStale) {
+         const days = Math.floor((now - timestamp!) / 86400);
          findings.push(finding(
             SEVERITY_WARNING,
             relpath,
@@ -366,6 +381,27 @@ export async function checkExecplans(
                'Fill in Outcomes & Retrospective, then move the plan to docs/exec-plans/completed/.',
             ));
          }
+      }
+
+      if (parsed.presentSections.has('Validation and Acceptance')) {
+         const body = parsed.sectionBodies['Validation and Acceptance'] ?? '';
+         if (!body.trim()) {
+            findings.push(finding(
+               SEVERITY_WARNING,
+               relpath,
+               'ExecPlan section `Validation and Acceptance` is empty.',
+               'Describe how a reader can verify the change works (commands to run, expected outputs, behaviors to observe).',
+            ));
+         }
+      }
+
+      if (isStale && parsed.progress.total > 0 && parsed.progress.remaining === 1) {
+         findings.push(finding(
+            SEVERITY_WARNING,
+            relpath,
+            'Active ExecPlan has a single unchecked task with no recent activity.',
+            'Either finish the remaining task or split it into smaller pieces and update Progress.',
+         ));
       }
    }
 
@@ -494,6 +530,457 @@ export async function checkAgentsMd(
    return checkResult('agents_md', findings, summary);
 }
 
+const CROSS_TOOL_ALIAS_FILES = [
+   'CLAUDE.md',
+   '.github/copilot-instructions.md',
+   '.windsurfrules',
+   'GEMINI.md',
+   'CONVENTIONS.md',
+];
+
+const CROSS_TOOL_ALIAS_DIRS = [
+   '.cursor/rules',
+];
+
+function tokenizeAliasContent(text: string): Set<string> {
+   const lines = text.split(/\r?\n/u);
+   const sentences = new Set<string>();
+   for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.length >= 30) {
+         sentences.add(trimmed.toLowerCase());
+      }
+   }
+   return sentences;
+}
+
+function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
+   if (a.size === 0 && b.size === 0) return 1;
+   let intersection = 0;
+   for (const value of a) {
+      if (b.has(value)) intersection += 1;
+   }
+   const union = a.size + b.size - intersection;
+   if (union === 0) return 1;
+   return intersection / union;
+}
+
+function aliasIncludesAgentsMd(text: string): boolean {
+   if (/@\.?\/?AGENTS\.md/u.test(text)) return true;
+   if (/^\s*read:\s*AGENTS\.md\s*$/mu.test(text)) return true;
+   if (/^\s*include:\s*AGENTS\.md\s*$/mu.test(text)) return true;
+   return false;
+}
+
+async function isSymlink(absolutePath: string): Promise<boolean> {
+   try {
+      const stat = await fs.lstat(absolutePath);
+      return stat.isSymbolicLink();
+   } catch (_error) {
+      return false;
+   }
+}
+
+async function listCursorRuleFiles(root: string): Promise<string[]> {
+   const dir = path.join(root, '.cursor', 'rules');
+   try {
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+      return entries
+         .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.mdc'))
+         .map((entry) => path.posix.join('.cursor/rules', entry.name))
+         .sort();
+   } catch (_error) {
+      return [];
+   }
+}
+
+export async function checkCrossToolAliases(root: string): Promise<CheckResult> {
+   const findings = [];
+   const agentsAbs = path.join(root, 'AGENTS.md');
+   const agentsExists = await pathExists(agentsAbs, 'file');
+   const agentsText = agentsExists ? await readText(agentsAbs) : '';
+   const agentsSentences = agentsExists ? tokenizeAliasContent(agentsText) : new Set<string>();
+
+   const aliasPaths: string[] = [];
+   for (const aliasPath of CROSS_TOOL_ALIAS_FILES) {
+      if (await pathExists(path.join(root, aliasPath), 'file')) {
+         aliasPaths.push(aliasPath);
+      }
+   }
+   for (const cursorDir of CROSS_TOOL_ALIAS_DIRS) {
+      if (cursorDir === '.cursor/rules') {
+         aliasPaths.push(...await listCursorRuleFiles(root));
+      }
+   }
+
+   if (!agentsExists) {
+      if (aliasPaths.length >= 2) {
+         let largest = aliasPaths[0];
+         let largestSize = -1;
+         for (const aliasPath of aliasPaths) {
+            try {
+               const stat = await fs.stat(path.join(root, aliasPath));
+               if (stat.size > largestSize) {
+                  largestSize = stat.size;
+                  largest = aliasPath;
+               }
+            } catch (_error) {
+               continue;
+            }
+         }
+         findings.push(finding(
+            SEVERITY_WARNING,
+            largest,
+            'Multiple cross-tool agent docs but no canonical AGENTS.md.',
+            'Pick AGENTS.md as the source of truth and make the others symlinks or @AGENTS.md includes.',
+         ));
+      }
+      const summary = findings.length === 0
+         ? 'No AGENTS.md and no cross-tool aliases to compare.'
+         : `${findings.length} cross-tool alias issue${findings.length === 1 ? '' : 's'}.`;
+      return checkResult('cross_tool_aliases', findings, summary);
+   }
+
+   for (const aliasPath of aliasPaths) {
+      const aliasAbs = path.join(root, aliasPath);
+      if (await isSymlink(aliasAbs)) continue;
+      const aliasText = await readText(aliasAbs);
+      if (!aliasText) continue;
+      if (aliasIncludesAgentsMd(aliasText)) continue;
+      if (aliasText === agentsText) continue;
+
+      const aliasSentences = tokenizeAliasContent(aliasText);
+      const similarity = jaccardSimilarity(agentsSentences, aliasSentences);
+      if (similarity < 0.5) {
+         findings.push(finding(
+            SEVERITY_WARNING,
+            aliasPath,
+            `Cross-tool alias \`${aliasPath}\` looks substantively different from AGENTS.md (similarity ${similarity.toFixed(2)}).`,
+            `Make \`${aliasPath}\` a symlink to AGENTS.md, or include AGENTS.md (e.g. \`@AGENTS.md\`).`,
+         ));
+      }
+   }
+
+   const summary = findings.length === 0
+      ? `Cross-tool aliases consistent with AGENTS.md (${aliasPaths.length} alias${aliasPaths.length === 1 ? '' : 'es'} checked).`
+      : `${findings.length} cross-tool alias drift finding${findings.length === 1 ? '' : 's'} across ${aliasPaths.length} alias${aliasPaths.length === 1 ? '' : 'es'}.`;
+
+   return checkResult('cross_tool_aliases', findings, summary);
+}
+
+const CONTEXT_BUDGET_DOCS = [
+   'AGENTS.md',
+   'CLAUDE.md',
+   '.github/copilot-instructions.md',
+];
+
+const CONTEXT_BUDGET_WARN_TOKENS = 4000;
+const CONTEXT_BUDGET_ERROR_TOKENS = 8000;
+
+export async function checkContextBudget(root: string): Promise<CheckResult> {
+   const findings = [];
+   let checkedCount = 0;
+
+   for (const docPath of CONTEXT_BUDGET_DOCS) {
+      const abs = path.join(root, docPath);
+      if (!(await pathExists(abs, 'file'))) continue;
+      checkedCount += 1;
+      const text = await readText(abs);
+      if (!text) continue;
+      const tokens = Math.ceil(text.length / 4);
+
+      if (tokens > CONTEXT_BUDGET_ERROR_TOKENS) {
+         findings.push(finding(
+            SEVERITY_ERROR,
+            docPath,
+            `Agent doc is approximately ${tokens} tokens (>${CONTEXT_BUDGET_ERROR_TOKENS}); agents typically read ≤ ${CONTEXT_BUDGET_WARN_TOKENS} efficiently.`,
+            'Trim the doc to a one-screen index; push detail into `docs/` and link from here.',
+            1,
+         ));
+      } else if (tokens > CONTEXT_BUDGET_WARN_TOKENS) {
+         findings.push(finding(
+            SEVERITY_WARNING,
+            docPath,
+            `Agent doc is approximately ${tokens} tokens (>${CONTEXT_BUDGET_WARN_TOKENS}); consider trimming.`,
+            'Move detail into `docs/` and keep this file as a short index.',
+            1,
+         ));
+      }
+   }
+
+   const summary = findings.length === 0
+      ? `Agent docs within context budget (${checkedCount} doc${checkedCount === 1 ? '' : 's'} checked).`
+      : `${findings.length} agent doc${findings.length === 1 ? '' : 's'} exceeds the context budget.`;
+
+   return checkResult('context_budget', findings, summary);
+}
+
+export async function checkReadmeDrift(root: string): Promise<CheckResult> {
+   const readmePath = path.join(root, 'README.md');
+   const agentsPath = path.join(root, 'AGENTS.md');
+   const readmeExists = await pathExists(readmePath, 'file');
+   const agentsExists = await pathExists(agentsPath, 'file');
+
+   if (!readmeExists || !agentsExists) {
+      return checkResult('readme_drift', [], 'README.md or AGENTS.md absent; nothing to compare.');
+   }
+
+   const readmeText = await readText(readmePath);
+   const agentsText = await readText(agentsPath);
+
+   const readmeRefs = extractTaskReferences(readmeText);
+   const agentsRefs = extractTaskReferences(agentsText);
+
+   const byRunnerReadme = new Map<string, Map<string, number>>();
+   const byRunnerAgents = new Map<string, Map<string, number>>();
+
+   function addRef(map: Map<string, Map<string, number>>, runner: string, token: string, line: number): void {
+      if (!map.has(runner)) map.set(runner, new Map());
+      const inner = map.get(runner)!;
+      if (!inner.has(token)) inner.set(token, line);
+   }
+
+   for (const ref of readmeRefs) addRef(byRunnerReadme, ref.runner, ref.token, ref.line);
+   for (const ref of agentsRefs) addRef(byRunnerAgents, ref.runner, ref.token, ref.line);
+
+   const findings = [];
+
+   const sharedRunners = new Set(
+      Array.from(byRunnerReadme.keys()).filter((r) => byRunnerAgents.has(r)),
+   );
+
+   for (const runner of sharedRunners) {
+      const readmeMap = byRunnerReadme.get(runner)!;
+      const agentsMap = byRunnerAgents.get(runner)!;
+      const runnerLabel = RUNNER_LABEL[runner] ?? runner;
+
+      for (const [ token, line ] of readmeMap.entries()) {
+         if (!agentsMap.has(token)) {
+            findings.push(finding(
+               SEVERITY_WARNING,
+               'README.md',
+               `README.md uses ${runnerLabel} task \`${token}\` but AGENTS.md does not mention it (drift).`,
+               'Align the two docs: either update AGENTS.md to match, or pick one canonical command and reference it from both.',
+               line,
+            ));
+         }
+      }
+      for (const [ token, line ] of agentsMap.entries()) {
+         if (!readmeMap.has(token)) {
+            findings.push(finding(
+               SEVERITY_WARNING,
+               'AGENTS.md',
+               `AGENTS.md uses ${runnerLabel} task \`${token}\` but README.md does not mention it (drift).`,
+               'Align the two docs: either update README.md to match, or pick one canonical command and reference it from both.',
+               line,
+            ));
+         }
+      }
+   }
+
+   const summary = findings.length === 0
+      ? 'README.md and AGENTS.md describe the same tasks consistently.'
+      : `${findings.length} task drift finding${findings.length === 1 ? '' : 's'} between README.md and AGENTS.md.`;
+
+   return checkResult('readme_drift', findings, summary);
+}
+
+async function rootPackageJsonHasWorkspaces(root: string): Promise<boolean> {
+   const text = await readText(path.join(root, 'package.json'));
+   if (!text) return false;
+   try {
+      const parsed: unknown = JSON.parse(text);
+      if (typeof parsed !== 'object' || parsed === null) return false;
+      const ws = (parsed as Record<string, unknown>).workspaces;
+      if (Array.isArray(ws) && ws.length > 0) return true;
+      if (ws && typeof ws === 'object' && Array.isArray((ws as Record<string, unknown>).packages)) {
+         return ((ws as Record<string, unknown>).packages as unknown[]).length > 0;
+      }
+      return false;
+   } catch (_error) {
+      return false;
+   }
+}
+
+export async function checkNesting(
+   root: string,
+   options: { excludes?: string[] } = {},
+): Promise<CheckResult> {
+   const excludes = options.excludes || [];
+   const files = await walkRepo(root, excludes);
+
+   const hasPnpmWorkspaces = files.includes('pnpm-workspace.yaml') || files.includes('pnpm-workspace.yml');
+   const hasNxJson = files.includes('nx.json');
+   const projectJsonFiles = files.filter((f) => path.posix.basename(f) === 'project.json');
+   const hasTurboJson = files.includes('turbo.json');
+   const rootHasWorkspaces = files.includes('package.json') && await rootPackageJsonHasWorkspaces(root);
+
+   const isMonorepo = hasPnpmWorkspaces || hasNxJson || hasTurboJson || rootHasWorkspaces || projectJsonFiles.length > 0;
+
+   if (!isMonorepo) {
+      return checkResult('nesting', [], 'Not a monorepo; per-package AGENTS.md not required.');
+   }
+
+   const packageDirs = new Set<string>();
+
+   for (const projectJson of projectJsonFiles) {
+      const dir = path.posix.dirname(projectJson);
+      if (dir && dir !== '.') packageDirs.add(dir);
+   }
+
+   if (rootHasWorkspaces || hasPnpmWorkspaces || hasTurboJson) {
+      for (const file of files) {
+         if (path.posix.basename(file) === 'package.json' && file !== 'package.json') {
+            const dir = path.posix.dirname(file);
+            packageDirs.add(dir);
+         }
+      }
+   }
+
+   if (packageDirs.size === 0) {
+      return checkResult('nesting', [], 'Monorepo detected but no package directories discovered.');
+   }
+
+   const findings = [];
+   const present: string[] = [];
+   const missing: string[] = [];
+
+   for (const dir of Array.from(packageDirs).sort()) {
+      const hasAgents = files.includes(`${dir}/AGENTS.md`);
+      const hasClaude = files.includes(`${dir}/CLAUDE.md`);
+      if (hasAgents || hasClaude) {
+         present.push(dir);
+      } else {
+         missing.push(dir);
+      }
+   }
+
+   const total = packageDirs.size;
+   const ratio = present.length / total;
+   const halfOrMore = ratio >= 0.5;
+
+   for (const dir of missing) {
+      const message = halfOrMore
+         ? `Most workspace packages have AGENTS.md; consider adding one to \`${dir}\` for consistency.`
+         : `Workspace package \`${dir}\` lacks AGENTS.md; subtree-specific guidance helps agents stay scoped.`;
+      findings.push(finding(
+         SEVERITY_WARNING,
+         dir,
+         message,
+         `Add \`${dir}/AGENTS.md\` describing the package's purpose, primary commands, and links to its docs.`,
+      ));
+   }
+
+   const summary = findings.length === 0
+      ? `All ${total} workspace package${total === 1 ? '' : 's'} have a per-package agent doc.`
+      : `${present.length}/${total} workspace package${total === 1 ? '' : 's'} have AGENTS.md; ${missing.length} missing.`;
+
+   return checkResult('nesting', findings, summary);
+}
+
+export const REPO_MAP_CANDIDATES = [
+   'docs/repo-map.md',
+   'docs/architecture.md',
+   'ARCHITECTURE.md',
+];
+
+export async function checkRepoMap(root: string): Promise<CheckResult> {
+   for (const candidate of REPO_MAP_CANDIDATES) {
+      if (await pathExists(path.join(root, candidate), 'file')) {
+         return checkResult('repo_map', [], `Repo map found at \`${candidate}\`.`);
+      }
+   }
+   const findings = [ finding(
+      SEVERITY_WARNING,
+      '.',
+      'No repo map found.',
+      'Add `docs/repo-map.md` or `ARCHITECTURE.md` describing module boundaries, allowed dependency directions, and where each subsystem lives.',
+   ) ];
+   return checkResult('repo_map', findings, 'No repo map found.');
+}
+
+function isAdrFile(relpath: string): boolean {
+   const lower = relpath.toLowerCase();
+   if (!/(?:\.md|\.mdx)$/u.test(lower)) return false;
+   return /(^|\/)(adr|adrs|decisions?)\//u.test(lower);
+}
+
+export async function checkAdrs(
+   root: string,
+   options: { excludes?: string[] } = {},
+): Promise<CheckResult> {
+   const excludes = options.excludes || [];
+   const files = await walkRepo(root, excludes);
+   const adrFiles = files.filter(isAdrFile).sort();
+
+   if (adrFiles.length === 0) {
+      return checkResult('adrs', [], 'No ADRs detected.');
+   }
+
+   const findings = [];
+
+   const adrDirs = new Set(adrFiles.map((f) => path.posix.dirname(f)));
+   for (const dir of adrDirs) {
+      const hasIndex = files.some((f) => {
+         const lower = f.toLowerCase();
+         return lower === `${dir.toLowerCase()}/readme.md` || lower === `${dir.toLowerCase()}/index.md`;
+      });
+      if (!hasIndex) {
+         findings.push(finding(
+            SEVERITY_WARNING,
+            dir,
+            'ADR directory has no index (`README.md` or `index.md`).',
+            `Add \`${dir}/README.md\` listing each ADR with title, date, and status.`,
+         ));
+      }
+   }
+
+   for (const adrPath of adrFiles) {
+      const lower = path.posix.basename(adrPath).toLowerCase();
+      if (lower === 'readme.md' || lower === 'index.md') continue;
+      const text = await readText(path.join(root, adrPath));
+      if (!text) continue;
+      const parsed = parseMarkdown(text);
+      const headings = new Set(parsed.headings.map((h) => h.text.toLowerCase().trim()));
+      const sectionMatches = [ 'status', 'context', 'decision' ].filter((name) => {
+         return Array.from(headings).some((h) => h === name || h.startsWith(`${name} `) || h.startsWith(`${name}:`));
+      }).length;
+      if (sectionMatches < 2) {
+         findings.push(finding(
+            SEVERITY_WARNING,
+            adrPath,
+            'ADR is missing standard sections (Status / Context / Decision).',
+            'Add headings for Status, Context, and Decision so the record is self-explanatory.',
+         ));
+      }
+
+      const supersededMatch = text.match(/superseded\s+by[^\n]*\[([^\]]+)\]\(([^)\s]+)\)/iu);
+      if (supersededMatch) {
+         const href = supersededMatch[2];
+         if (!isExternalHref(href)) {
+            const resolved = resolveLinkTarget(adrPath, href);
+            if (resolved.target && !resolved.target.startsWith('..')) {
+               const exists = await fileExistsInRepo(root, resolved.target);
+               if (!exists) {
+                  findings.push(finding(
+                     SEVERITY_ERROR,
+                     adrPath,
+                     `ADR claims supersession by \`${href}\` but the target does not exist.`,
+                     'Update the link to point at the actual successor ADR or remove the supersession claim.',
+                  ));
+               }
+            }
+         }
+      }
+   }
+
+   const summary = findings.length === 0
+      ? `All ${adrFiles.length} ADR${adrFiles.length === 1 ? '' : 's'} look healthy.`
+      : `${findings.length} ADR finding${findings.length === 1 ? '' : 's'} across ${adrFiles.length} file${adrFiles.length === 1 ? '' : 's'}.`;
+
+   return checkResult('adrs', findings, summary);
+}
+
 type CheckFn = (root: string, options?: Record<string, unknown>) => Promise<CheckResult>;
 
 export const AVAILABLE_CHECKS: Record<string, CheckFn> = {
@@ -502,6 +989,12 @@ export const AVAILABLE_CHECKS: Record<string, CheckFn> = {
    commands: checkCommands as CheckFn,
    execplans: checkExecplans as CheckFn,
    agents_md: checkAgentsMd as CheckFn,
+   cross_tool_aliases: checkCrossToolAliases as CheckFn,
+   context_budget: checkContextBudget as CheckFn,
+   readme_drift: checkReadmeDrift as CheckFn,
+   nesting: checkNesting as CheckFn,
+   repo_map: checkRepoMap as CheckFn,
+   adrs: checkAdrs as CheckFn,
 };
 
 export async function runAudit(root: string, selectedChecks: string[]): Promise<AuditReport> {

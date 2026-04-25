@@ -12,6 +12,10 @@ import { cmakeAdapter } from './cmake.js';
 import { composerAdapter } from './composer.js';
 import { rakeAdapter } from './rake.js';
 import { xcodeAdapter } from './xcode.js';
+import { nxAdapter } from './nx.js';
+import { turboAdapter } from './turbo.js';
+import { miseAdapter } from './mise.js';
+import { mixAdapter } from './mix.js';
 import type { AggregatedTaskSurface, LanguageAdapter } from './types.js';
 
 export type { LanguageAdapter, TaskSurfaceResult, AggregatedTaskSurface } from './types.js';
@@ -28,6 +32,10 @@ export { cmakeAdapter } from './cmake.js';
 export { composerAdapter } from './composer.js';
 export { rakeAdapter } from './rake.js';
 export { xcodeAdapter } from './xcode.js';
+export { nxAdapter } from './nx.js';
+export { turboAdapter } from './turbo.js';
+export { miseAdapter } from './mise.js';
+export { mixAdapter } from './mix.js';
 
 export const ALL_ADAPTERS: LanguageAdapter[] = [
    javascriptAdapter,
@@ -43,6 +51,10 @@ export const ALL_ADAPTERS: LanguageAdapter[] = [
    composerAdapter,
    rakeAdapter,
    xcodeAdapter,
+   nxAdapter,
+   turboAdapter,
+   miseAdapter,
+   mixAdapter,
 ];
 
 export const TASK_FILE_PATTERNS: string[] = ALL_ADAPTERS.flatMap((a) => a.patterns);
@@ -63,6 +75,12 @@ export const TASK_FILE_NAMES = new Set([
    'rakefile',
    'rakefile.rb',
    'fastfile',
+   'nx.json',
+   'project.json',
+   'turbo.json',
+   '.mise.toml',
+   'mise.toml',
+   'mix.exs',
 ]);
 
 export const MANIFEST_FILE_NAMES = new Set([
@@ -82,6 +100,9 @@ export const MANIFEST_FILE_NAMES = new Set([
    'requirements.txt',
    'setup.py',
    'tox.ini',
+   'nx.json',
+   'project.json',
+   'turbo.json',
 ]);
 
 export async function collectAllTaskSurfaces(

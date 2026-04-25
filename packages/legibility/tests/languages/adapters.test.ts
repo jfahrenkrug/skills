@@ -17,6 +17,10 @@ import { parseCmakeTargets, cmakeAdapter } from '../../src/languages/cmake.js';
 import { parseComposerScripts, composerAdapter } from '../../src/languages/composer.js';
 import { parseRakefile, rakeAdapter } from '../../src/languages/rake.js';
 import { parseFastfileLanes, parseXcodeSchemeFilenames, xcodeAdapter } from '../../src/languages/xcode.js';
+import { parseNxTargets, nxAdapter } from '../../src/languages/nx.js';
+import { parseTurboTasks, turboAdapter } from '../../src/languages/turbo.js';
+import { parseMiseTasks, miseAdapter } from '../../src/languages/mise.js';
+import { deriveMixTaskName, mixAdapter } from '../../src/languages/mix.js';
 import {
    ALL_ADAPTERS,
    TASK_FILE_NAMES,
@@ -52,7 +56,7 @@ describe('constants', () => {
    });
 
    it('ALL_ADAPTERS contains all registered adapters', () => {
-      expect(ALL_ADAPTERS.length).toBe(13);
+      expect(ALL_ADAPTERS.length).toBe(17);
       const ids = ALL_ADAPTERS.map((a) => a.id);
       expect(ids).toContain('javascript');
       expect(ids).toContain('make');
@@ -67,6 +71,10 @@ describe('constants', () => {
       expect(ids).toContain('composer');
       expect(ids).toContain('rake');
       expect(ids).toContain('xcode');
+      expect(ids).toContain('nx');
+      expect(ids).toContain('turbo');
+      expect(ids).toContain('mise');
+      expect(ids).toContain('mix');
    });
 });
 
@@ -578,5 +586,124 @@ describe('parseXcodeSchemeFilenames', () => {
 
    it('ignores files outside xcshareddata/xcschemes', () => {
       expect(parseXcodeSchemeFilenames([ 'src/foo.swift', 'pom.xml' ]).size).toBe(0);
+   });
+});
+
+describe('parseNxTargets', () => {
+   it('extracts target names from project.json', () => {
+      const text = JSON.stringify({ targets: { build: { executor: 'x' }, test: {} } });
+      const result = parseNxTargets(text);
+      expect(Array.from(result).sort()).toEqual([ 'build', 'test' ]);
+   });
+
+   it('extracts targetDefaults keys from nx.json', () => {
+      const text = JSON.stringify({ targetDefaults: { build: {}, lint: {} } });
+      const result = parseNxTargets(text);
+      expect(result.has('build')).toBe(true);
+      expect(result.has('lint')).toBe(true);
+   });
+
+   it('returns empty set for malformed JSON', () => {
+      expect(parseNxTargets('not json').size).toBe(0);
+   });
+});
+
+describe('parseTurboTasks', () => {
+   it('extracts pipeline keys (Turbo v1)', () => {
+      const text = JSON.stringify({ pipeline: { build: {}, test: {} } });
+      expect(Array.from(parseTurboTasks(text)).sort()).toEqual([ 'build', 'test' ]);
+   });
+
+   it('extracts tasks keys (Turbo v2)', () => {
+      const text = JSON.stringify({ tasks: { lint: {}, 'app#build': {} } });
+      const result = parseTurboTasks(text);
+      expect(result.has('lint')).toBe(true);
+      expect(result.has('app#build')).toBe(true);
+      expect(result.has('build')).toBe(true);
+   });
+
+   it('returns empty set for malformed JSON', () => {
+      expect(parseTurboTasks('not json').size).toBe(0);
+   });
+});
+
+describe('parseMiseTasks', () => {
+   it('extracts tasks defined as table headers', () => {
+      const text = [
+         '[tools]',
+         'node = "20"',
+         '',
+         '[tasks.build]',
+         'run = "tsc"',
+         '',
+         '[tasks.test]',
+         'run = "vitest"',
+      ].join('\n');
+      const result = parseMiseTasks(text);
+      expect(result.has('build')).toBe(true);
+      expect(result.has('test')).toBe(true);
+   });
+
+   it('extracts tasks from inline [tasks] table form', () => {
+      const text = [
+         '[tasks]',
+         'lint = "eslint ."',
+         'fmt = "prettier --write ."',
+         '',
+         '[tools]',
+         'node = "20"',
+      ].join('\n');
+      const result = parseMiseTasks(text);
+      expect(result.has('lint')).toBe(true);
+      expect(result.has('fmt')).toBe(true);
+   });
+});
+
+describe('mixAdapter', () => {
+   it('deriveMixTaskName takes the basename minus .ex', () => {
+      expect(deriveMixTaskName('lib/mix/tasks/foo.ex')).toBe('foo');
+      expect(deriveMixTaskName('lib/mix/tasks/my_task.ex')).toBe('my_task');
+      expect(deriveMixTaskName('lib/foo.ex')).toBe('foo');
+      expect(deriveMixTaskName('readme.md')).toBeNull();
+   });
+
+   it('collectTaskSurface returns built-ins plus discovered tasks when mix.exs exists', async () => {
+      const files = [ 'mix.exs', 'lib/mix/tasks/release.ex', 'lib/mix/tasks/seed.ex' ];
+      const result = await mixAdapter.collectTaskSurface('/tmp/ignored', files);
+      expect(result.names.has('compile')).toBe(true);
+      expect(result.names.has('test')).toBe(true);
+      expect(result.names.has('seed')).toBe(true);
+      expect(result.names.has('release')).toBe(true);
+      expect(result.sourceFiles.has('mix.exs')).toBe(true);
+   });
+
+   it('returns empty surface when mix.exs is absent', async () => {
+      const files = [ 'lib/mix/tasks/foo.ex' ];
+      const result = await mixAdapter.collectTaskSurface('/tmp/ignored', files);
+      expect(result.names.size).toBe(0);
+   });
+});
+
+describe('new orchestrator adapter detect()', () => {
+   it('nxAdapter detects nx.json and project.json', () => {
+      expect(nxAdapter.detect([ 'nx.json' ])).toBe(true);
+      expect(nxAdapter.detect([ 'apps/foo/project.json' ])).toBe(true);
+      expect(nxAdapter.detect([ 'package.json' ])).toBe(false);
+   });
+
+   it('turboAdapter detects turbo.json', () => {
+      expect(turboAdapter.detect([ 'turbo.json' ])).toBe(true);
+      expect(turboAdapter.detect([ 'package.json' ])).toBe(false);
+   });
+
+   it('miseAdapter detects mise.toml and .mise.toml', () => {
+      expect(miseAdapter.detect([ 'mise.toml' ])).toBe(true);
+      expect(miseAdapter.detect([ '.mise.toml' ])).toBe(true);
+      expect(miseAdapter.detect([ 'package.json' ])).toBe(false);
+   });
+
+   it('mixAdapter detects mix.exs', () => {
+      expect(mixAdapter.detect([ 'mix.exs' ])).toBe(true);
+      expect(mixAdapter.detect([ 'package.json' ])).toBe(false);
    });
 });
