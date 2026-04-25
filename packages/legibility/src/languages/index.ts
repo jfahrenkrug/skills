@@ -4,6 +4,14 @@ import { makeAdapter } from './make.js';
 import { justAdapter } from './just.js';
 import { taskfileAdapter } from './taskfile.js';
 import { rustAdapter } from './rust.js';
+import { pythonAdapter } from './python.js';
+import { gradleAdapter } from './gradle.js';
+import { mavenAdapter } from './maven.js';
+import { dotnetAdapter } from './dotnet.js';
+import { cmakeAdapter } from './cmake.js';
+import { composerAdapter } from './composer.js';
+import { rakeAdapter } from './rake.js';
+import { xcodeAdapter } from './xcode.js';
 import type { AggregatedTaskSurface, LanguageAdapter } from './types.js';
 
 export type { LanguageAdapter, TaskSurfaceResult, AggregatedTaskSurface } from './types.js';
@@ -12,6 +20,14 @@ export { makeAdapter } from './make.js';
 export { justAdapter } from './just.js';
 export { taskfileAdapter } from './taskfile.js';
 export { rustAdapter } from './rust.js';
+export { pythonAdapter } from './python.js';
+export { gradleAdapter } from './gradle.js';
+export { mavenAdapter } from './maven.js';
+export { dotnetAdapter } from './dotnet.js';
+export { cmakeAdapter } from './cmake.js';
+export { composerAdapter } from './composer.js';
+export { rakeAdapter } from './rake.js';
+export { xcodeAdapter } from './xcode.js';
 
 export const ALL_ADAPTERS: LanguageAdapter[] = [
    javascriptAdapter,
@@ -19,6 +35,14 @@ export const ALL_ADAPTERS: LanguageAdapter[] = [
    justAdapter,
    taskfileAdapter,
    rustAdapter,
+   pythonAdapter,
+   gradleAdapter,
+   mavenAdapter,
+   dotnetAdapter,
+   cmakeAdapter,
+   composerAdapter,
+   rakeAdapter,
+   xcodeAdapter,
 ];
 
 export const TASK_FILE_PATTERNS: string[] = ALL_ADAPTERS.flatMap((a) => a.patterns);
@@ -29,19 +53,35 @@ export const TASK_FILE_NAMES = new Set([
    'taskfile.yml',
    'taskfile.yaml',
    'package.json',
+   'pyproject.toml',
+   'tox.ini',
+   'build.gradle',
+   'build.gradle.kts',
+   'pom.xml',
+   'cmakelists.txt',
+   'composer.json',
+   'rakefile',
+   'rakefile.rb',
+   'fastfile',
 ]);
 
 export const MANIFEST_FILE_NAMES = new Set([
    'build.gradle',
    'build.gradle.kts',
    'cargo.toml',
+   'cmakelists.txt',
+   'composer.json',
+   'fastfile',
    'gemfile',
    'go.mod',
    'mix.exs',
    'package.json',
    'pom.xml',
    'pyproject.toml',
+   'rakefile',
    'requirements.txt',
+   'setup.py',
+   'tox.ini',
 ]);
 
 export async function collectAllTaskSurfaces(

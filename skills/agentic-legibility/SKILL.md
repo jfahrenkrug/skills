@@ -142,7 +142,9 @@ If a fresh agent would need hidden context from a person or chat thread, the rep
 
 Language-specific task-runner parsing lives in `packages/legibility/src/languages/`. Each file exports one adapter that implements `LanguageAdapter` from `src/languages/types.ts`.
 
-**To add support for a new ecosystem** (e.g. `gradle`, `mix`, `rake`):
+The skill ships adapters for `javascript` (npm/pnpm/yarn/bun), `make`, `just`, `task` (Taskfile), `cargo`, `python` (pyproject.toml + tox.ini), `gradle`, `maven`, `dotnet` (MSBuild), `cmake`, `composer` (PHP), `rake` (Ruby/Rails), and `xcode` (xcschemes + Fastlane).
+
+**To add support for a new ecosystem** (e.g. `mix`, `bazel`, `pants`):
 
 1. Create `packages/legibility/src/languages/<ecosystem>.ts`:
    - Set `id` to the runner name (used as key in `collectTaskSurfaceByRunner` output).

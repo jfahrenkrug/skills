@@ -245,6 +245,10 @@ const TASK_REFERENCE_PATTERNS = [
    { runner: 'just', regex: /(?:^|[\s&;|(])just\s+([A-Za-z0-9_.:-]+)/gu },
    { runner: 'task', regex: /(?:^|[\s&;|(])task\s+([A-Za-z0-9_.:-]+)/gu },
    { runner: 'cargo', regex: /(?:^|[\s&;|(])cargo\s+([A-Za-z0-9_.:-]+)/gu },
+   { runner: 'gradle', regex: /(?:^|[\s&;|(])(?:\.\/)?gradlew?\s+([A-Za-z0-9_.:-]+)/gu },
+   { runner: 'maven', regex: /(?:^|[\s&;|(])(?:mvn|mvnw|\.\/mvnw)\s+([A-Za-z0-9_.:-]+)/gu },
+   { runner: 'composer', regex: /(?:^|[\s&;|(])composer\s+(?:run(?:-script)?\s+)?([A-Za-z0-9_.:-]+)/gu },
+   { runner: 'rake', regex: /(?:^|[\s&;|(])(?:bundle\s+exec\s+)?rake\s+([A-Za-z0-9_.:-]+)/gu },
 ];
 
 function isPlaceholderToken(token: string): boolean {

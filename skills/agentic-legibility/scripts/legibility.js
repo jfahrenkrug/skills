@@ -135,7 +135,7 @@ async function readCandidates(paths, root, patterns) {
   }
   return selected;
 }
-const PATTERNS$4 = ["package.json"];
+const PATTERNS$c = ["package.json"];
 function parsePackageScripts(text) {
   try {
     const parsed = JSON.parse(text);
@@ -152,12 +152,12 @@ function parsePackageScripts(text) {
 const javascriptAdapter = {
   id: "javascript",
   displayName: "JavaScript / Node.js",
-  patterns: PATTERNS$4,
+  patterns: PATTERNS$c,
   detect(files) {
     return files.some((f) => f.toLowerCase().endsWith("package.json"));
   },
   async collectTaskSurface(root, files) {
-    const candidates = await readCandidates(files, root, PATTERNS$4);
+    const candidates = await readCandidates(files, root, PATTERNS$c);
     const names = /* @__PURE__ */ new Set();
     const sourceFiles = /* @__PURE__ */ new Set();
     for (const [relpath, text] of Object.entries(candidates)) {
@@ -168,7 +168,7 @@ const javascriptAdapter = {
     return { names, sourceFiles };
   }
 };
-const PATTERNS$3 = ["Makefile", "makefile"];
+const PATTERNS$b = ["Makefile", "makefile"];
 function parseMakeTargets(text) {
   const targets = /* @__PURE__ */ new Set();
   for (const line of text.split(/\r?\n/u)) {
@@ -183,7 +183,7 @@ function parseMakeTargets(text) {
 const makeAdapter = {
   id: "make",
   displayName: "GNU Make",
-  patterns: PATTERNS$3,
+  patterns: PATTERNS$b,
   detect(files) {
     return files.some((f) => {
       const base = f.split("/").pop()?.toLowerCase();
@@ -191,7 +191,7 @@ const makeAdapter = {
     });
   },
   async collectTaskSurface(root, files) {
-    const candidates = await readCandidates(files, root, PATTERNS$3);
+    const candidates = await readCandidates(files, root, PATTERNS$b);
     const names = /* @__PURE__ */ new Set();
     const sourceFiles = /* @__PURE__ */ new Set();
     for (const [relpath, text] of Object.entries(candidates)) {
@@ -202,7 +202,7 @@ const makeAdapter = {
     return { names, sourceFiles };
   }
 };
-const PATTERNS$2 = ["justfile", "Justfile"];
+const PATTERNS$a = ["justfile", "Justfile"];
 function parseJustTargets(text) {
   const targets = /* @__PURE__ */ new Set();
   for (const line of text.split(/\r?\n/u)) {
@@ -214,7 +214,7 @@ function parseJustTargets(text) {
 const justAdapter = {
   id: "just",
   displayName: "just",
-  patterns: PATTERNS$2,
+  patterns: PATTERNS$a,
   detect(files) {
     return files.some((f) => {
       const base = f.split("/").pop()?.toLowerCase();
@@ -222,7 +222,7 @@ const justAdapter = {
     });
   },
   async collectTaskSurface(root, files) {
-    const candidates = await readCandidates(files, root, PATTERNS$2);
+    const candidates = await readCandidates(files, root, PATTERNS$a);
     const names = /* @__PURE__ */ new Set();
     const sourceFiles = /* @__PURE__ */ new Set();
     for (const [relpath, text] of Object.entries(candidates)) {
@@ -233,7 +233,7 @@ const justAdapter = {
     return { names, sourceFiles };
   }
 };
-const PATTERNS$1 = ["Taskfile.yml", "Taskfile.yaml"];
+const PATTERNS$9 = ["Taskfile.yml", "Taskfile.yaml"];
 function parseTaskfileTargets(text) {
   const targets = /* @__PURE__ */ new Set();
   let inTasks = false;
@@ -252,7 +252,7 @@ function parseTaskfileTargets(text) {
 const taskfileAdapter = {
   id: "task",
   displayName: "Task (go-task)",
-  patterns: PATTERNS$1,
+  patterns: PATTERNS$9,
   detect(files) {
     return files.some((f) => {
       const base = f.split("/").pop()?.toLowerCase();
@@ -260,7 +260,7 @@ const taskfileAdapter = {
     });
   },
   async collectTaskSurface(root, files) {
-    const candidates = await readCandidates(files, root, PATTERNS$1);
+    const candidates = await readCandidates(files, root, PATTERNS$9);
     const names = /* @__PURE__ */ new Set();
     const sourceFiles = /* @__PURE__ */ new Set();
     for (const [relpath, text] of Object.entries(candidates)) {
@@ -271,7 +271,7 @@ const taskfileAdapter = {
     return { names, sourceFiles };
   }
 };
-const PATTERNS = [".cargo/config.toml", ".cargo/config"];
+const PATTERNS$8 = [".cargo/config.toml", ".cargo/config"];
 function parseCargoAliases(text) {
   const targets = /* @__PURE__ */ new Set();
   let inAlias = false;
@@ -291,16 +291,420 @@ function parseCargoAliases(text) {
 const rustAdapter = {
   id: "cargo",
   displayName: "Rust / Cargo",
-  patterns: PATTERNS,
+  patterns: PATTERNS$8,
   detect(files) {
     return files.some((f) => f.toLowerCase().endsWith(".cargo/config.toml") || f.toLowerCase().endsWith(".cargo/config"));
   },
   async collectTaskSurface(root, files) {
-    const candidates = await readCandidates(files, root, PATTERNS);
+    const candidates = await readCandidates(files, root, PATTERNS$8);
     const names = /* @__PURE__ */ new Set();
     const sourceFiles = /* @__PURE__ */ new Set();
     for (const [relpath, text] of Object.entries(candidates)) {
       const parsed = parseCargoAliases(text);
+      for (const n of parsed) names.add(n);
+      if (parsed.size > 0) sourceFiles.add(relpath);
+    }
+    return { names, sourceFiles };
+  }
+};
+const PATTERNS$7 = ["pyproject.toml", "setup.py", "tox.ini"];
+const SCRIPT_TABLE_PATTERNS = [
+  /^\[project\.scripts\]\s*$/u,
+  /^\[tool\.poetry\.scripts\]\s*$/u,
+  /^\[tool\.pdm\.scripts\]\s*$/u,
+  /^\[tool\.hatch\.envs\.[^\]]+\.scripts\]\s*$/u
+];
+function isTableHeader(line) {
+  return /^\[[^\]]+\]\s*$/u.test(line);
+}
+function matchesScriptTable(line) {
+  return SCRIPT_TABLE_PATTERNS.some((rx) => rx.test(line));
+}
+function parsePythonScripts(text) {
+  const names = /* @__PURE__ */ new Set();
+  let inScriptTable = false;
+  for (const raw of text.split(/\r?\n/u)) {
+    const stripped = raw.trim();
+    if (!stripped || stripped.startsWith("#")) continue;
+    if (isTableHeader(stripped)) {
+      inScriptTable = matchesScriptTable(stripped);
+      continue;
+    }
+    if (!inScriptTable) continue;
+    const match = stripped.match(/^([A-Za-z0-9_.:-]+)\s*=/u);
+    if (match) names.add(match[1]);
+  }
+  return names;
+}
+function parseToxEnvlist(text) {
+  const envs = /* @__PURE__ */ new Set();
+  const lines = text.split(/\r?\n/u);
+  let inTox = false;
+  let collecting = false;
+  let buffer = "";
+  function flush() {
+    if (buffer) {
+      for (const name of splitEnvlist(buffer)) envs.add(name);
+      buffer = "";
+    }
+    collecting = false;
+  }
+  for (const raw of lines) {
+    const stripped = raw.trim();
+    if (/^\[[^\]]+\]\s*$/u.test(stripped)) {
+      flush();
+      inTox = stripped === "[tox]";
+      continue;
+    }
+    if (!inTox) continue;
+    if (!collecting) {
+      const match = raw.match(/^\s*envlist\s*=\s*(.*)$/u);
+      if (match) {
+        buffer = match[1].trim();
+        collecting = true;
+      }
+      continue;
+    }
+    if (stripped === "") continue;
+    if (raw[0] === " " || raw[0] === "	") {
+      buffer += " " + stripped;
+      continue;
+    }
+    flush();
+    if (/^\s*[A-Za-z_][A-Za-z0-9_]*\s*=/u.test(raw)) continue;
+  }
+  flush();
+  return envs;
+}
+function splitEnvlist(raw) {
+  return raw.split(/[\s,]+/u).map((s) => s.trim()).filter((s) => s.length > 0 && !s.startsWith("#"));
+}
+const pythonAdapter = {
+  id: "python",
+  displayName: "Python",
+  patterns: PATTERNS$7,
+  detect(files) {
+    return files.some((f) => {
+      const base = f.split("/").pop()?.toLowerCase();
+      return base === "pyproject.toml" || base === "setup.py" || base === "tox.ini";
+    });
+  },
+  async collectTaskSurface(root, files) {
+    const candidates = await readCandidates(files, root, PATTERNS$7);
+    const names = /* @__PURE__ */ new Set();
+    const sourceFiles = /* @__PURE__ */ new Set();
+    for (const [relpath, text] of Object.entries(candidates)) {
+      const base = relpath.split("/").pop()?.toLowerCase();
+      let parsed = /* @__PURE__ */ new Set();
+      if (base === "pyproject.toml") {
+        parsed = parsePythonScripts(text);
+      } else if (base === "tox.ini") {
+        const envs = parseToxEnvlist(text);
+        for (const env of envs) parsed.add(`tox:${env}`);
+      }
+      for (const n of parsed) names.add(n);
+      if (parsed.size > 0) sourceFiles.add(relpath);
+    }
+    return { names, sourceFiles };
+  }
+};
+const PATTERNS$6 = ["build.gradle", "build.gradle.kts"];
+const GROOVY_TASK = /(?:^|\n)\s*task\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:\([^)]*\))?\s*[{(<]/gu;
+const KOTLIN_REGISTER = /tasks\.register(?:<[^>]+>)?\s*\(\s*["']([^"']+)["']/gu;
+const KOTLIN_CREATE = /tasks\.create(?:<[^>]+>)?\s*\(\s*["']([^"']+)["']/gu;
+const KOTLIN_REGISTERING = /val\s+([A-Za-z_][A-Za-z0-9_]*)\s+by\s+tasks\.(?:registering|creating)/gu;
+function parseGradleTasks(text) {
+  const names = /* @__PURE__ */ new Set();
+  for (const regex of [GROOVY_TASK, KOTLIN_REGISTER, KOTLIN_CREATE, KOTLIN_REGISTERING]) {
+    regex.lastIndex = 0;
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+      names.add(match[1]);
+    }
+  }
+  return names;
+}
+const gradleAdapter = {
+  id: "gradle",
+  displayName: "Gradle",
+  patterns: PATTERNS$6,
+  detect(files) {
+    return files.some((f) => {
+      const base = f.split("/").pop()?.toLowerCase();
+      return base === "build.gradle" || base === "build.gradle.kts";
+    });
+  },
+  async collectTaskSurface(root, files) {
+    const candidates = await readCandidates(files, root, PATTERNS$6);
+    const names = /* @__PURE__ */ new Set();
+    const sourceFiles = /* @__PURE__ */ new Set();
+    for (const [relpath, text] of Object.entries(candidates)) {
+      const parsed = parseGradleTasks(text);
+      for (const n of parsed) names.add(n);
+      if (parsed.size > 0) sourceFiles.add(relpath);
+    }
+    return { names, sourceFiles };
+  }
+};
+const PATTERNS$5 = ["pom.xml"];
+const PROFILE_ID = /<profile>[\s\S]*?<id>\s*([A-Za-z0-9_.:-]+)\s*<\/id>/gu;
+const GOAL = /<goal>\s*([A-Za-z0-9_.:-]+)\s*<\/goal>/gu;
+function parseMavenGoals(text) {
+  const names = /* @__PURE__ */ new Set();
+  for (const regex of [PROFILE_ID, GOAL]) {
+    regex.lastIndex = 0;
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+      names.add(match[1]);
+    }
+  }
+  return names;
+}
+const mavenAdapter = {
+  id: "maven",
+  displayName: "Maven",
+  patterns: PATTERNS$5,
+  detect(files) {
+    return files.some((f) => f.split("/").pop()?.toLowerCase() === "pom.xml");
+  },
+  async collectTaskSurface(root, files) {
+    const candidates = await readCandidates(files, root, PATTERNS$5);
+    const names = /* @__PURE__ */ new Set();
+    const sourceFiles = /* @__PURE__ */ new Set();
+    for (const [relpath, text] of Object.entries(candidates)) {
+      const parsed = parseMavenGoals(text);
+      for (const n of parsed) names.add(n);
+      if (parsed.size > 0) sourceFiles.add(relpath);
+    }
+    return { names, sourceFiles };
+  }
+};
+const PATTERNS$4 = ["*.csproj", "*.fsproj", "*.vbproj"];
+const TARGET = /<Target\s+[^>]*\bName\s*=\s*"([^"]+)"/gu;
+function parseMsbuildTargets(text) {
+  const names = /* @__PURE__ */ new Set();
+  TARGET.lastIndex = 0;
+  let match;
+  while ((match = TARGET.exec(text)) !== null) {
+    names.add(match[1]);
+  }
+  return names;
+}
+function isProjectFile(path2) {
+  const base = path2.split("/").pop()?.toLowerCase() ?? "";
+  return base.endsWith(".csproj") || base.endsWith(".fsproj") || base.endsWith(".vbproj");
+}
+const dotnetAdapter = {
+  id: "dotnet",
+  displayName: ".NET / MSBuild",
+  patterns: PATTERNS$4,
+  detect(files) {
+    return files.some(isProjectFile);
+  },
+  async collectTaskSurface(root, files) {
+    const candidates = await readCandidates(files, root, PATTERNS$4);
+    const names = /* @__PURE__ */ new Set();
+    const sourceFiles = /* @__PURE__ */ new Set();
+    for (const [relpath, text] of Object.entries(candidates)) {
+      const parsed = parseMsbuildTargets(text);
+      for (const n of parsed) names.add(n);
+      if (parsed.size > 0) sourceFiles.add(relpath);
+    }
+    return { names, sourceFiles };
+  }
+};
+const PATTERNS$3 = ["CMakeLists.txt"];
+const CUSTOM_TARGET = /\badd_custom_target\s*\(\s*([A-Za-z_][A-Za-z0-9_.-]*)/gu;
+const EXECUTABLE = /\badd_executable\s*\(\s*([A-Za-z_][A-Za-z0-9_.-]*)/gu;
+const LIBRARY = /\badd_library\s*\(\s*([A-Za-z_][A-Za-z0-9_.-]*)/gu;
+function parseCmakeTargets(text) {
+  const names = /* @__PURE__ */ new Set();
+  for (const regex of [CUSTOM_TARGET, EXECUTABLE, LIBRARY]) {
+    regex.lastIndex = 0;
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+      names.add(match[1]);
+    }
+  }
+  return names;
+}
+const cmakeAdapter = {
+  id: "cmake",
+  displayName: "CMake",
+  patterns: PATTERNS$3,
+  detect(files) {
+    return files.some((f) => f.split("/").pop()?.toLowerCase() === "cmakelists.txt");
+  },
+  async collectTaskSurface(root, files) {
+    const candidates = await readCandidates(files, root, PATTERNS$3);
+    const names = /* @__PURE__ */ new Set();
+    const sourceFiles = /* @__PURE__ */ new Set();
+    for (const [relpath, text] of Object.entries(candidates)) {
+      const parsed = parseCmakeTargets(text);
+      for (const n of parsed) names.add(n);
+      if (parsed.size > 0) sourceFiles.add(relpath);
+    }
+    return { names, sourceFiles };
+  }
+};
+const PATTERNS$2 = ["composer.json"];
+function parseComposerScripts(text) {
+  const names = /* @__PURE__ */ new Set();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return names;
+  }
+  if (!data || typeof data !== "object") return names;
+  const scripts = data.scripts;
+  if (!scripts || typeof scripts !== "object" || Array.isArray(scripts)) return names;
+  for (const key of Object.keys(scripts)) {
+    names.add(key);
+  }
+  return names;
+}
+const composerAdapter = {
+  id: "composer",
+  displayName: "Composer",
+  patterns: PATTERNS$2,
+  detect(files) {
+    return files.some((f) => f.split("/").pop()?.toLowerCase() === "composer.json");
+  },
+  async collectTaskSurface(root, files) {
+    const candidates = await readCandidates(files, root, PATTERNS$2);
+    const names = /* @__PURE__ */ new Set();
+    const sourceFiles = /* @__PURE__ */ new Set();
+    for (const [relpath, text] of Object.entries(candidates)) {
+      const parsed = parseComposerScripts(text);
+      for (const n of parsed) names.add(n);
+      if (parsed.size > 0) sourceFiles.add(relpath);
+    }
+    return { names, sourceFiles };
+  }
+};
+const PATTERNS$1 = ["Rakefile", "rakefile", "Rakefile.rb", "**/*.rake"];
+const NAMESPACE_OPEN = /^\s*namespace\s+:([A-Za-z_][A-Za-z0-9_]*)\s+do\b/u;
+const NAMESPACE_OPEN_STR = /^\s*namespace\s+["']([A-Za-z_][A-Za-z0-9_]*)["']\s+do\b/u;
+const TASK_SYM = /^\s*task\s+:([A-Za-z_][A-Za-z0-9_]*)\b/u;
+const TASK_STR = /^\s*task\s+["']([A-Za-z_][A-Za-z0-9_]*)["']/u;
+const BLOCK_END = /^\s*end\b/u;
+const BLOCK_OPEN = /\bdo\b(\s*\|[^|]*\|)?\s*$|\{\s*(?:\|[^|]*\|)?\s*$/u;
+function parseRakefile(text) {
+  const names = /* @__PURE__ */ new Set();
+  const stack = [];
+  function currentPrefix() {
+    const parts = stack.filter((f) => f.kind === "ns").map((f) => f.name);
+    return parts.length > 0 ? parts.join(":") + ":" : "";
+  }
+  const lines = text.split(/\r?\n/u);
+  for (const raw of lines) {
+    const line = raw.replace(/#.*$/u, "");
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const nsMatch = line.match(NAMESPACE_OPEN) ?? line.match(NAMESPACE_OPEN_STR);
+    if (nsMatch) {
+      stack.push({ kind: "ns", name: nsMatch[1] });
+      continue;
+    }
+    const taskMatch = line.match(TASK_SYM) ?? line.match(TASK_STR);
+    if (taskMatch) {
+      names.add(currentPrefix() + taskMatch[1]);
+      if (BLOCK_OPEN.test(line)) {
+        stack.push({ kind: "other" });
+      }
+      continue;
+    }
+    if (BLOCK_END.test(line)) {
+      if (stack.length > 0) stack.pop();
+      continue;
+    }
+    if (BLOCK_OPEN.test(line)) {
+      stack.push({ kind: "other" });
+      continue;
+    }
+  }
+  return names;
+}
+function isRakeFile(relpath) {
+  const base = relpath.split("/").pop() ?? "";
+  const lower = base.toLowerCase();
+  if (lower === "rakefile" || lower === "rakefile.rb") return true;
+  return lower.endsWith(".rake");
+}
+const rakeAdapter = {
+  id: "rake",
+  displayName: "rake",
+  patterns: PATTERNS$1,
+  detect(files) {
+    return files.some(isRakeFile);
+  },
+  async collectTaskSurface(root, files) {
+    const rakeFiles = files.filter(isRakeFile);
+    const candidates = await readCandidates(rakeFiles, root, rakeFiles);
+    const names = /* @__PURE__ */ new Set();
+    const sourceFiles = /* @__PURE__ */ new Set();
+    for (const [relpath, text] of Object.entries(candidates)) {
+      const parsed = parseRakefile(text);
+      for (const n of parsed) names.add(n);
+      if (parsed.size > 0) sourceFiles.add(relpath);
+    }
+    return { names, sourceFiles };
+  }
+};
+const PATTERNS = [
+  "**/xcshareddata/xcschemes/*.xcscheme",
+  "Fastfile",
+  "fastlane/Fastfile"
+];
+const LANE = /^\s*lane\s+:([A-Za-z_][A-Za-z0-9_]*)\s+do\b/u;
+function parseFastfileLanes(text) {
+  const names = /* @__PURE__ */ new Set();
+  for (const raw of text.split(/\r?\n/u)) {
+    const line = raw.replace(/#.*$/u, "");
+    const match = line.match(LANE);
+    if (match) names.add(match[1]);
+  }
+  return names;
+}
+function parseXcodeSchemeFilenames(files) {
+  const names = /* @__PURE__ */ new Set();
+  for (const f of files) {
+    if (!f.includes("/xcshareddata/xcschemes/")) continue;
+    const base = f.split("/").pop() ?? "";
+    if (!base.toLowerCase().endsWith(".xcscheme")) continue;
+    const stem = base.slice(0, -".xcscheme".length);
+    if (stem) names.add(stem);
+  }
+  return names;
+}
+function isFastfile(relpath) {
+  const base = relpath.split("/").pop()?.toLowerCase() ?? "";
+  return base === "fastfile";
+}
+function isScheme(relpath) {
+  return relpath.includes("/xcshareddata/xcschemes/") && relpath.toLowerCase().endsWith(".xcscheme");
+}
+const xcodeAdapter = {
+  id: "xcode",
+  displayName: "Xcode",
+  patterns: PATTERNS,
+  detect(files) {
+    return files.some((f) => isFastfile(f) || isScheme(f) || f.includes(".xcodeproj/"));
+  },
+  async collectTaskSurface(root, files) {
+    const names = /* @__PURE__ */ new Set();
+    const sourceFiles = /* @__PURE__ */ new Set();
+    for (const scheme of parseXcodeSchemeFilenames(files)) {
+      names.add(scheme);
+    }
+    for (const f of files) {
+      if (isScheme(f)) sourceFiles.add(f);
+    }
+    const fastfiles = files.filter(isFastfile);
+    const candidates = await readCandidates(fastfiles, root, fastfiles);
+    for (const [relpath, text] of Object.entries(candidates)) {
+      const parsed = parseFastfileLanes(text);
       for (const n of parsed) names.add(n);
       if (parsed.size > 0) sourceFiles.add(relpath);
     }
@@ -312,7 +716,15 @@ const ALL_ADAPTERS = [
   makeAdapter,
   justAdapter,
   taskfileAdapter,
-  rustAdapter
+  rustAdapter,
+  pythonAdapter,
+  gradleAdapter,
+  mavenAdapter,
+  dotnetAdapter,
+  cmakeAdapter,
+  composerAdapter,
+  rakeAdapter,
+  xcodeAdapter
 ];
 const TASK_FILE_PATTERNS = ALL_ADAPTERS.flatMap((a) => a.patterns);
 const TASK_FILE_NAMES = /* @__PURE__ */ new Set([
@@ -320,19 +732,35 @@ const TASK_FILE_NAMES = /* @__PURE__ */ new Set([
   "justfile",
   "taskfile.yml",
   "taskfile.yaml",
-  "package.json"
+  "package.json",
+  "pyproject.toml",
+  "tox.ini",
+  "build.gradle",
+  "build.gradle.kts",
+  "pom.xml",
+  "cmakelists.txt",
+  "composer.json",
+  "rakefile",
+  "rakefile.rb",
+  "fastfile"
 ]);
 const MANIFEST_FILE_NAMES = /* @__PURE__ */ new Set([
   "build.gradle",
   "build.gradle.kts",
   "cargo.toml",
+  "cmakelists.txt",
+  "composer.json",
+  "fastfile",
   "gemfile",
   "go.mod",
   "mix.exs",
   "package.json",
   "pom.xml",
   "pyproject.toml",
-  "requirements.txt"
+  "rakefile",
+  "requirements.txt",
+  "setup.py",
+  "tox.ini"
 ]);
 async function collectAllTaskSurfaces(root, files) {
   const task_surface = /* @__PURE__ */ new Set();
@@ -1385,7 +1813,11 @@ const TASK_REFERENCE_PATTERNS = [
   { runner: "make", regex: /(?:^|[\s&;|(])make\s+([A-Za-z0-9_.:-]+)/gu },
   { runner: "just", regex: /(?:^|[\s&;|(])just\s+([A-Za-z0-9_.:-]+)/gu },
   { runner: "task", regex: /(?:^|[\s&;|(])task\s+([A-Za-z0-9_.:-]+)/gu },
-  { runner: "cargo", regex: /(?:^|[\s&;|(])cargo\s+([A-Za-z0-9_.:-]+)/gu }
+  { runner: "cargo", regex: /(?:^|[\s&;|(])cargo\s+([A-Za-z0-9_.:-]+)/gu },
+  { runner: "gradle", regex: /(?:^|[\s&;|(])(?:\.\/)?gradlew?\s+([A-Za-z0-9_.:-]+)/gu },
+  { runner: "maven", regex: /(?:^|[\s&;|(])(?:mvn|mvnw|\.\/mvnw)\s+([A-Za-z0-9_.:-]+)/gu },
+  { runner: "composer", regex: /(?:^|[\s&;|(])composer\s+(?:run(?:-script)?\s+)?([A-Za-z0-9_.:-]+)/gu },
+  { runner: "rake", regex: /(?:^|[\s&;|(])(?:bundle\s+exec\s+)?rake\s+([A-Za-z0-9_.:-]+)/gu }
 ];
 function isPlaceholderToken(token) {
   if (/^[A-Z]$/u.test(token)) return true;
@@ -1712,7 +2144,15 @@ const RUNNER_LABEL = {
   make: "make",
   just: "just",
   task: "task",
-  cargo: "cargo"
+  cargo: "cargo",
+  python: "Python",
+  gradle: "Gradle",
+  maven: "Maven",
+  dotnet: ".NET / MSBuild",
+  cmake: "CMake",
+  composer: "Composer",
+  rake: "rake",
+  xcode: "Xcode"
 };
 async function checkCommands(root, options = {}) {
   const excludes = options.excludes || [];

@@ -249,6 +249,14 @@ const RUNNER_LABEL: Record<string, string> = {
    just: 'just',
    task: 'task',
    cargo: 'cargo',
+   python: 'Python',
+   gradle: 'Gradle',
+   maven: 'Maven',
+   dotnet: '.NET / MSBuild',
+   cmake: 'CMake',
+   composer: 'Composer',
+   rake: 'rake',
+   xcode: 'Xcode',
 };
 
 export async function checkCommands(
