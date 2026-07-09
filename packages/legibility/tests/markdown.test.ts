@@ -7,6 +7,7 @@ import {
    isExternalHref,
    splitHref,
    resolveReference,
+   extractTaskReferences,
 } from '../src/lib/markdown.js';
 
 describe('markdown', () => {
@@ -128,6 +129,30 @@ describe('markdown', () => {
          const md = 'See [docs](docs/intro.md "the intro").';
          const { links } = parseMarkdown(md);
          expect(links[0].href).toBe('docs/intro.md');
+      });
+   });
+
+   describe('extractTaskReferences', () => {
+      it('maps JavaScript package-manager run commands to the JavaScript task surface', () => {
+         const refs = extractTaskReferences('Run `npm run typo` and `pnpm run build`.');
+         expect(refs.map((ref) => ({ runner: ref.runner, token: ref.token }))).toEqual([
+            { runner: 'javascript', token: 'typo' },
+            { runner: 'javascript', token: 'build' },
+         ]);
+      });
+
+      it('does not treat common ecosystem built-ins as custom task references', () => {
+         const refs = extractTaskReferences([
+            'Use `mvn test`, `composer install`, and `./gradlew build`.',
+            'Custom tasks are still checked: `composer qa`, `composer run lint`, `composer run audit`, `composer run-script install`, and `./gradlew releaseDocs`.',
+         ].join('\n'));
+         expect(refs.map((ref) => ({ runner: ref.runner, token: ref.token }))).toEqual([
+            { runner: 'composer', token: 'qa' },
+            { runner: 'composer', token: 'lint' },
+            { runner: 'composer', token: 'audit' },
+            { runner: 'composer', token: 'install' },
+            { runner: 'gradle', token: 'releaseDocs' },
+         ]);
       });
    });
 });

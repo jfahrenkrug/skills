@@ -2060,14 +2060,15 @@ function extractInlineCodeSpans(text) {
   return spans;
 }
 const TASK_REFERENCE_PATTERNS = [
-  { runner: "npm", regex: /(?:^|[\s&;|(])(?:npm|pnpm|yarn|bun)\s+run(?:-script)?\s+([A-Za-z0-9_.:-]+)/gu },
+  { runner: "javascript", regex: /(?:^|[\s&;|(])(?:npm|pnpm|yarn|bun)\s+run(?:-script)?\s+([A-Za-z0-9_.:-]+)/gu },
   { runner: "make", regex: /(?:^|[\s&;|(])make\s+([A-Za-z0-9_.:-]+)/gu },
   { runner: "just", regex: /(?:^|[\s&;|(])just\s+([A-Za-z0-9_.:-]+)/gu },
   { runner: "task", regex: /(?:^|[\s&;|(])task\s+([A-Za-z0-9_.:-]+)/gu },
   { runner: "cargo", regex: /(?:^|[\s&;|(])cargo\s+([A-Za-z0-9_.:-]+)/gu },
   { runner: "gradle", regex: /(?:^|[\s&;|(])(?:\.\/)?gradlew?\s+([A-Za-z0-9_.:-]+)/gu },
   { runner: "maven", regex: /(?:^|[\s&;|(])(?:mvn|mvnw|\.\/mvnw)\s+([A-Za-z0-9_.:-]+)/gu },
-  { runner: "composer", regex: /(?:^|[\s&;|(])composer\s+(?:run(?:-script)?\s+)?([A-Za-z0-9_.:-]+)/gu },
+  { runner: "composer", regex: /(?:^|[\s&;|(])composer\s+run(?:-script)?\s+([A-Za-z0-9_.:-]+)/gu },
+  { runner: "composer", regex: /(?:^|[\s&;|(])composer\s+([A-Za-z0-9_.:-]+)/gu, filterBuiltins: true },
   { runner: "rake", regex: /(?:^|[\s&;|(])(?:bundle\s+exec\s+)?rake\s+([A-Za-z0-9_.:-]+)/gu },
   { runner: "nx", regex: /(?:^|[\s&;|(])(?:npx\s+|pnpm\s+|yarn\s+)?nx\s+(?:run\s+)?([A-Za-z0-9_.:-]+)/gu },
   { runner: "turbo", regex: /(?:^|[\s&;|(])(?:npx\s+|pnpm\s+|yarn\s+)?turbo\s+(?:run\s+)?([A-Za-z0-9_.:-]+)/gu },
@@ -2080,6 +2081,87 @@ function isPlaceholderToken(token) {
   return false;
 }
 const MAKE_BUILTINS = /* @__PURE__ */ new Set(["clean", "all", "install", "help"]);
+const GRADLE_BUILTINS = /* @__PURE__ */ new Set([
+  "assemble",
+  "build",
+  "buildEnvironment",
+  "check",
+  "clean",
+  "components",
+  "dependencies",
+  "dependencyInsight",
+  "dependentComponents",
+  "help",
+  "init",
+  "javaToolchains",
+  "model",
+  "outgoingVariants",
+  "projects",
+  "properties",
+  "resolvableConfigurations",
+  "tasks",
+  "test",
+  "wrapper",
+  "bootRun",
+  "bootJar",
+  "bootWar"
+]);
+const MAVEN_BUILTINS = /* @__PURE__ */ new Set([
+  "validate",
+  "compile",
+  "test",
+  "package",
+  "verify",
+  "install",
+  "deploy",
+  "clean",
+  "site"
+]);
+const COMPOSER_BUILTINS = /* @__PURE__ */ new Set([
+  "about",
+  "archive",
+  "audit",
+  "browse",
+  "check-platform-reqs",
+  "clear-cache",
+  "clearcache",
+  "config",
+  "create-project",
+  "depends",
+  "diagnose",
+  "dump-autoload",
+  "dumpautoload",
+  "exec",
+  "fund",
+  "global",
+  "help",
+  "home",
+  "i",
+  "info",
+  "init",
+  "install",
+  "licenses",
+  "list",
+  "outdated",
+  "prohibits",
+  "reinstall",
+  "remove",
+  "require",
+  "run",
+  "run-script",
+  "search",
+  "self-update",
+  "selfupdate",
+  "show",
+  "status",
+  "suggests",
+  "u",
+  "update",
+  "upgrade",
+  "validate",
+  "why",
+  "why-not"
+]);
 const CARGO_BUILTINS = /* @__PURE__ */ new Set([
   "build",
   "check",
@@ -2124,14 +2206,18 @@ function extractTaskReferences(text) {
   const snippets = extractCodeSnippets(text);
   const references = [];
   for (const { snippet, line } of snippets) {
-    for (const { runner, regex } of TASK_REFERENCE_PATTERNS) {
+    for (const { runner, regex, filterBuiltins } of TASK_REFERENCE_PATTERNS) {
       regex.lastIndex = 0;
       let match;
       while ((match = regex.exec(snippet)) !== null) {
         const token = match[1];
+        if (token.startsWith("-")) continue;
         if (isPlaceholderToken(token)) continue;
         if (runner === "make" && MAKE_BUILTINS.has(token)) continue;
         if (runner === "cargo" && CARGO_BUILTINS.has(token)) continue;
+        if (runner === "gradle" && GRADLE_BUILTINS.has(token)) continue;
+        if (runner === "maven" && MAVEN_BUILTINS.has(token)) continue;
+        if (runner === "composer" && filterBuiltins && COMPOSER_BUILTINS.has(token)) continue;
         references.push({
           runner,
           token,
