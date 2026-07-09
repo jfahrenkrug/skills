@@ -7,9 +7,9 @@ If the repository is a monorepo with multiple projects or packages, see [monorep
 ## Workflow
 
 1. **Audit the current repo-visible guidance.**
-   Inspect the root `README.md`, `AGENTS.md`, `CLAUDE.md`, `docs/`, task entrypoints, validation commands, and any existing decision records. Run the scoring script if available to establish a baseline.
+   Start with `node scripts/legibility.js audit --check-artifacts /path/to/repo` to confirm which required artifacts are missing; this is what triggered **Initial setup** in the first place. Then inspect the root `README.md`, `AGENTS.md`, `CLAUDE.md`, `docs/`, task entrypoints, validation commands, and any existing decision records. Run `legibility score /path/to/repo` to establish a baseline for the eight scorecard dimensions.
 
-   In monorepos, also run `score_repo.js --list-scopes` and keep a working inventory of every
+   In monorepos, also run `legibility list-scopes /path/to/repo` and keep a working inventory of every
    discovered scope. Do not treat the inventory as optional background information.
 
 2. **Establish a small stable entrypoint.**
@@ -31,7 +31,7 @@ If the repository is a monorepo with multiple projects or packages, see [monorep
    Create a consistent place for ADRs or equivalent records with enough structure that an agent can follow why the system looks the way it does.
 
 8. **Add an audit loop.**
-   Run `scripts/score_repo.js` so legibility can be measured from repo-visible evidence before and after improvements.
+   Run `legibility score` before and after each change to track score deltas. Run `legibility audit --check-all` to verify that the infrastructure you added is internally consistent (links resolve, task references exist, ExecPlans are complete). Both commands are documented in the Mechanical Audit Loop section of [SKILL.md](SKILL.md) and in [references/audit-checks.md](references/audit-checks.md).
 
 ## Required Artifacts
 
@@ -59,7 +59,7 @@ When you are creating a new one, `AGENTS.md` should cover only the essentials:
 - available repo-local skills or agent helpers
 - hard constraints worth surfacing at the root
 
-In a monorepo, the root map must also account for every scope returned by `score_repo.js --list-scopes`.
+In a monorepo, the root map must also account for every scope returned by `legibility list-scopes`.
 Each scope must be:
 
 - listed directly in the root `AGENTS.md`

@@ -1,0 +1,3525 @@
+#!/usr/bin/env node
+// GENERATED FILE — do not edit.
+// Source: packages/legibility/src/
+// Rebuild: cd packages/legibility && npm run build
+import path from "node:path";
+import { promises, realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+const IGNORED_DIRS = /* @__PURE__ */ new Set([
+  ".git",
+  ".hg",
+  ".mypy_cache",
+  ".next",
+  ".nuxt",
+  ".pytest_cache",
+  ".svn",
+  ".turbo",
+  ".venv",
+  ".yarn",
+  "__pycache__",
+  "build",
+  "coverage",
+  "dist",
+  "node_modules",
+  "out",
+  "target",
+  "vendor"
+]);
+const DOC_EXTENSIONS = /* @__PURE__ */ new Set([".md", ".mdx", ".rst", ".txt"]);
+const MAX_TEXT_SIZE = 25e4;
+function toPosix(value) {
+  return value.split(path.sep).join("/");
+}
+function rel(root, absolutePath) {
+  return toPosix(path.relative(root, absolutePath));
+}
+function escapeRegex(value) {
+  return value.replace(/[|\\{}()[\]^$+?.]/gu, "\\$&");
+}
+function globToRegExp(pattern) {
+  let result = "";
+  for (let index = 0; index < pattern.length; index += 1) {
+    const char = pattern[index];
+    const next = pattern[index + 1];
+    if (char === "*" && next === "*") {
+      result += ".*";
+      index += 1;
+    } else if (char === "*") {
+      result += "[^/]*";
+    } else if (char === "?") {
+      result += ".";
+    } else {
+      result += escapeRegex(char);
+    }
+  }
+  return new RegExp(`^${result}$`, "u");
+}
+function matchesExclude(relpath, patterns) {
+  if (patterns.length === 0) {
+    return false;
+  }
+  return patterns.some((pattern) => {
+    const trimmed = pattern.replace(/\/+$/gu, "");
+    if (relpath === pattern || relpath.startsWith(`${trimmed}/`)) {
+      return true;
+    }
+    return globToRegExp(pattern).test(relpath);
+  });
+}
+async function readText(filePath) {
+  try {
+    const stat = await promises.stat(filePath);
+    if (stat.size > MAX_TEXT_SIZE) {
+      return "";
+    }
+    return await promises.readFile(filePath, "utf8");
+  } catch (_error) {
+    return "";
+  }
+}
+async function isDirectory(targetPath) {
+  try {
+    return (await promises.stat(targetPath)).isDirectory();
+  } catch (_error) {
+    return false;
+  }
+}
+async function readDirEntries(targetPath) {
+  try {
+    return await promises.readdir(targetPath, { withFileTypes: true });
+  } catch (_error) {
+    return [];
+  }
+}
+async function walkRepo(root, excludes = []) {
+  const excludePatterns = excludes.map((pattern) => pattern.trim().replace(/^\/+|\/+$/gu, "")).filter(Boolean);
+  const stack = [root];
+  const results = [];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) {
+      continue;
+    }
+    const entries = await readDirEntries(current);
+    for (const entry of entries) {
+      const absolutePath = path.join(current, entry.name);
+      const relpath = rel(root, absolutePath);
+      if (matchesExclude(relpath, excludePatterns)) {
+        continue;
+      }
+      if (entry.isDirectory()) {
+        if (!IGNORED_DIRS.has(entry.name)) {
+          stack.push(absolutePath);
+        }
+      } else {
+        results.push(relpath);
+      }
+    }
+  }
+  return results;
+}
+function findFiles(paths, ...patterns) {
+  const matchers = patterns.map(globToRegExp);
+  return paths.filter((relpath) => {
+    const basename = path.posix.basename(relpath);
+    return matchers.some((matcher) => matcher.test(basename) || matcher.test(relpath));
+  });
+}
+async function readCandidates(paths, root, patterns) {
+  const selected = {};
+  for (const relpath of findFiles(paths, ...patterns)) {
+    selected[relpath] = await readText(path.join(root, relpath));
+  }
+  return selected;
+}
+const PATTERNS$g = ["package.json"];
+function parsePackageScripts(text) {
+  try {
+    const parsed = JSON.parse(text);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return /* @__PURE__ */ new Set();
+    const scripts = parsed.scripts;
+    if (!scripts || typeof scripts !== "object" || Array.isArray(scripts)) {
+      return /* @__PURE__ */ new Set();
+    }
+    return new Set(Object.keys(scripts).map((name) => String(name).trim()));
+  } catch (_error) {
+    return /* @__PURE__ */ new Set();
+  }
+}
+const javascriptAdapter = {
+  id: "javascript",
+  displayName: "JavaScript / Node.js",
+  patterns: PATTERNS$g,
+  detect(files) {
+    return files.some((f) => f.toLowerCase().endsWith("package.json"));
+  },
+  async collectTaskSurface(root, files) {
+    const candidates = await readCandidates(files, root, PATTERNS$g);
+    const names = /* @__PURE__ */ new Set();
+    const sourceFiles = /* @__PURE__ */ new Set();
+    for (const [relpath, text] of Object.entries(candidates)) {
+      const parsed = parsePackageScripts(text);
+      for (const n of parsed) names.add(n);
+      if (parsed.size > 0) sourceFiles.add(relpath);
+    }
+    return { names, sourceFiles };
+  }
+};
+const PATTERNS$f = ["Makefile", "makefile"];
+function parseMakeTargets(text) {
+  const targets = /* @__PURE__ */ new Set();
+  for (const line of text.split(/\r?\n/u)) {
+    if (line.startsWith("	") || line.startsWith(" ")) continue;
+    const match = line.match(/^([A-Za-z0-9_.-]+):(?:\s|$)/u);
+    if (match && !match[1].startsWith(".")) {
+      targets.add(match[1]);
+    }
+  }
+  return targets;
+}
+const makeAdapter = {
+  id: "make",
+  displayName: "GNU Make",
+  patterns: PATTERNS$f,
+  detect(files) {
+    return files.some((f) => {
+      const base = f.split("/").pop()?.toLowerCase();
+      return base === "makefile";
+    });
+  },
+  async collectTaskSurface(root, files) {
+    const candidates = await readCandidates(files, root, PATTERNS$f);
+    const names = /* @__PURE__ */ new Set();
+    const sourceFiles = /* @__PURE__ */ new Set();
+    for (const [relpath, text] of Object.entries(candidates)) {
+      const parsed = parseMakeTargets(text);
+      for (const n of parsed) names.add(n);
+      sourceFiles.add(relpath);
+    }
+    return { names, sourceFiles };
+  }
+};
+const PATTERNS$e = ["justfile", "Justfile"];
+function parseJustTargets(text) {
+  const targets = /* @__PURE__ */ new Set();
+  for (const line of text.split(/\r?\n/u)) {
+    const match = line.match(/^([A-Za-z0-9_.-]+):(?:\s|$)/u);
+    if (match) targets.add(match[1]);
+  }
+  return targets;
+}
+const justAdapter = {
+  id: "just",
+  displayName: "just",
+  patterns: PATTERNS$e,
+  detect(files) {
+    return files.some((f) => {
+      const base = f.split("/").pop()?.toLowerCase();
+      return base === "justfile";
+    });
+  },
+  async collectTaskSurface(root, files) {
+    const candidates = await readCandidates(files, root, PATTERNS$e);
+    const names = /* @__PURE__ */ new Set();
+    const sourceFiles = /* @__PURE__ */ new Set();
+    for (const [relpath, text] of Object.entries(candidates)) {
+      const parsed = parseJustTargets(text);
+      for (const n of parsed) names.add(n);
+      sourceFiles.add(relpath);
+    }
+    return { names, sourceFiles };
+  }
+};
+const PATTERNS$d = ["Taskfile.yml", "Taskfile.yaml"];
+function parseTaskfileTargets(text) {
+  const targets = /* @__PURE__ */ new Set();
+  let inTasks = false;
+  for (const line of text.split(/\r?\n/u)) {
+    if (/^tasks:\s*$/u.test(line)) {
+      inTasks = true;
+      continue;
+    }
+    if (inTasks && /^[A-Za-z]/u.test(line)) break;
+    if (!inTasks) continue;
+    const match = line.match(/^\s{2,}([A-Za-z0-9_.-]+):\s*$/u);
+    if (match) targets.add(match[1]);
+  }
+  return targets;
+}
+const taskfileAdapter = {
+  id: "task",
+  displayName: "Task (go-task)",
+  patterns: PATTERNS$d,
+  detect(files) {
+    return files.some((f) => {
+      const base = f.split("/").pop()?.toLowerCase();
+      return base === "taskfile.yml" || base === "taskfile.yaml";
+    });
+  },
+  async collectTaskSurface(root, files) {
+    const candidates = await readCandidates(files, root, PATTERNS$d);
+    const names = /* @__PURE__ */ new Set();
+    const sourceFiles = /* @__PURE__ */ new Set();
+    for (const [relpath, text] of Object.entries(candidates)) {
+      const parsed = parseTaskfileTargets(text);
+      for (const n of parsed) names.add(n);
+      sourceFiles.add(relpath);
+    }
+    return { names, sourceFiles };
+  }
+};
+const PATTERNS$c = [".cargo/config.toml", ".cargo/config"];
+function parseCargoAliases(text) {
+  const targets = /* @__PURE__ */ new Set();
+  let inAlias = false;
+  for (const line of text.split(/\r?\n/u)) {
+    const stripped = line.trim();
+    if (!stripped || stripped.startsWith("#")) continue;
+    if (/^\[[^\]]+\]\s*$/u.test(stripped)) {
+      inAlias = stripped.toLowerCase() === "[alias]";
+      continue;
+    }
+    if (!inAlias) continue;
+    const match = stripped.match(/^([A-Za-z0-9_.:-]+)\s*=/u);
+    if (match) targets.add(match[1]);
+  }
+  return targets;
+}
+const rustAdapter = {
+  id: "cargo",
+  displayName: "Rust / Cargo",
+  patterns: PATTERNS$c,
+  detect(files) {
+    return files.some((f) => f.toLowerCase().endsWith(".cargo/config.toml") || f.toLowerCase().endsWith(".cargo/config"));
+  },
+  async collectTaskSurface(root, files) {
+    const candidates = await readCandidates(files, root, PATTERNS$c);
+    const names = /* @__PURE__ */ new Set();
+    const sourceFiles = /* @__PURE__ */ new Set();
+    for (const [relpath, text] of Object.entries(candidates)) {
+      const parsed = parseCargoAliases(text);
+      for (const n of parsed) names.add(n);
+      if (parsed.size > 0) sourceFiles.add(relpath);
+    }
+    return { names, sourceFiles };
+  }
+};
+const PATTERNS$b = ["pyproject.toml", "setup.py", "tox.ini"];
+const SCRIPT_TABLE_PATTERNS = [
+  /^\[project\.scripts\]\s*$/u,
+  /^\[tool\.poetry\.scripts\]\s*$/u,
+  /^\[tool\.pdm\.scripts\]\s*$/u,
+  /^\[tool\.hatch\.envs\.[^\]]+\.scripts\]\s*$/u
+];
+function isTableHeader(line) {
+  return /^\[[^\]]+\]\s*$/u.test(line);
+}
+function matchesScriptTable(line) {
+  return SCRIPT_TABLE_PATTERNS.some((rx) => rx.test(line));
+}
+function parsePythonScripts(text) {
+  const names = /* @__PURE__ */ new Set();
+  let inScriptTable = false;
+  for (const raw of text.split(/\r?\n/u)) {
+    const stripped = raw.trim();
+    if (!stripped || stripped.startsWith("#")) continue;
+    if (isTableHeader(stripped)) {
+      inScriptTable = matchesScriptTable(stripped);
+      continue;
+    }
+    if (!inScriptTable) continue;
+    const match = stripped.match(/^([A-Za-z0-9_.:-]+)\s*=/u);
+    if (match) names.add(match[1]);
+  }
+  return names;
+}
+function parseToxEnvlist(text) {
+  const envs = /* @__PURE__ */ new Set();
+  const lines = text.split(/\r?\n/u);
+  let inTox = false;
+  let collecting = false;
+  let buffer = "";
+  function flush() {
+    if (buffer) {
+      for (const name of splitEnvlist(buffer)) envs.add(name);
+      buffer = "";
+    }
+    collecting = false;
+  }
+  for (const raw of lines) {
+    const stripped = raw.trim();
+    if (/^\[[^\]]+\]\s*$/u.test(stripped)) {
+      flush();
+      inTox = stripped === "[tox]";
+      continue;
+    }
+    if (!inTox) continue;
+    if (!collecting) {
+      const match = raw.match(/^\s*envlist\s*=\s*(.*)$/u);
+      if (match) {
+        buffer = match[1].trim();
+        collecting = true;
+      }
+      continue;
+    }
+    if (stripped === "") continue;
+    if (raw[0] === " " || raw[0] === "	") {
+      buffer += " " + stripped;
+      continue;
+    }
+    flush();
+    if (/^\s*[A-Za-z_][A-Za-z0-9_]*\s*=/u.test(raw)) continue;
+  }
+  flush();
+  return envs;
+}
+function splitEnvlist(raw) {
+  return raw.split(/[\s,]+/u).map((s) => s.trim()).filter((s) => s.length > 0 && !s.startsWith("#"));
+}
+const pythonAdapter = {
+  id: "python",
+  displayName: "Python",
+  patterns: PATTERNS$b,
+  detect(files) {
+    return files.some((f) => {
+      const base = f.split("/").pop()?.toLowerCase();
+      return base === "pyproject.toml" || base === "setup.py" || base === "tox.ini";
+    });
+  },
+  async collectTaskSurface(root, files) {
+    const candidates = await readCandidates(files, root, PATTERNS$b);
+    const names = /* @__PURE__ */ new Set();
+    const sourceFiles = /* @__PURE__ */ new Set();
+    for (const [relpath, text] of Object.entries(candidates)) {
+      const base = relpath.split("/").pop()?.toLowerCase();
+      let parsed = /* @__PURE__ */ new Set();
+      if (base === "pyproject.toml") {
+        parsed = parsePythonScripts(text);
+      } else if (base === "tox.ini") {
+        const envs = parseToxEnvlist(text);
+        for (const env of envs) parsed.add(`tox:${env}`);
+      }
+      for (const n of parsed) names.add(n);
+      if (parsed.size > 0) sourceFiles.add(relpath);
+    }
+    return { names, sourceFiles };
+  }
+};
+const PATTERNS$a = ["build.gradle", "build.gradle.kts"];
+const GROOVY_TASK = /(?:^|\n)\s*task\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:\([^)]*\))?\s*[{(<]/gu;
+const KOTLIN_REGISTER = /tasks\.register(?:<[^>]+>)?\s*\(\s*["']([^"']+)["']/gu;
+const KOTLIN_CREATE = /tasks\.create(?:<[^>]+>)?\s*\(\s*["']([^"']+)["']/gu;
+const KOTLIN_REGISTERING = /val\s+([A-Za-z_][A-Za-z0-9_]*)\s+by\s+tasks\.(?:registering|creating)/gu;
+function parseGradleTasks(text) {
+  const names = /* @__PURE__ */ new Set();
+  for (const regex of [GROOVY_TASK, KOTLIN_REGISTER, KOTLIN_CREATE, KOTLIN_REGISTERING]) {
+    regex.lastIndex = 0;
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+      names.add(match[1]);
+    }
+  }
+  return names;
+}
+const gradleAdapter = {
+  id: "gradle",
+  displayName: "Gradle",
+  patterns: PATTERNS$a,
+  detect(files) {
+    return files.some((f) => {
+      const base = f.split("/").pop()?.toLowerCase();
+      return base === "build.gradle" || base === "build.gradle.kts";
+    });
+  },
+  async collectTaskSurface(root, files) {
+    const candidates = await readCandidates(files, root, PATTERNS$a);
+    const names = /* @__PURE__ */ new Set();
+    const sourceFiles = /* @__PURE__ */ new Set();
+    for (const [relpath, text] of Object.entries(candidates)) {
+      const parsed = parseGradleTasks(text);
+      for (const n of parsed) names.add(n);
+      if (parsed.size > 0) sourceFiles.add(relpath);
+    }
+    return { names, sourceFiles };
+  }
+};
+const PATTERNS$9 = ["pom.xml"];
+const PROFILE_ID = /<profile>[\s\S]*?<id>\s*([A-Za-z0-9_.:-]+)\s*<\/id>/gu;
+const GOAL = /<goal>\s*([A-Za-z0-9_.:-]+)\s*<\/goal>/gu;
+function parseMavenGoals(text) {
+  const names = /* @__PURE__ */ new Set();
+  for (const regex of [PROFILE_ID, GOAL]) {
+    regex.lastIndex = 0;
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+      names.add(match[1]);
+    }
+  }
+  return names;
+}
+const mavenAdapter = {
+  id: "maven",
+  displayName: "Maven",
+  patterns: PATTERNS$9,
+  detect(files) {
+    return files.some((f) => f.split("/").pop()?.toLowerCase() === "pom.xml");
+  },
+  async collectTaskSurface(root, files) {
+    const candidates = await readCandidates(files, root, PATTERNS$9);
+    const names = /* @__PURE__ */ new Set();
+    const sourceFiles = /* @__PURE__ */ new Set();
+    for (const [relpath, text] of Object.entries(candidates)) {
+      const parsed = parseMavenGoals(text);
+      for (const n of parsed) names.add(n);
+      if (parsed.size > 0) sourceFiles.add(relpath);
+    }
+    return { names, sourceFiles };
+  }
+};
+const PATTERNS$8 = ["*.csproj", "*.fsproj", "*.vbproj"];
+const TARGET = /<Target\s+[^>]*\bName\s*=\s*"([^"]+)"/gu;
+function parseMsbuildTargets(text) {
+  const names = /* @__PURE__ */ new Set();
+  TARGET.lastIndex = 0;
+  let match;
+  while ((match = TARGET.exec(text)) !== null) {
+    names.add(match[1]);
+  }
+  return names;
+}
+function isProjectFile(path2) {
+  const base = path2.split("/").pop()?.toLowerCase() ?? "";
+  return base.endsWith(".csproj") || base.endsWith(".fsproj") || base.endsWith(".vbproj");
+}
+const dotnetAdapter = {
+  id: "dotnet",
+  displayName: ".NET / MSBuild",
+  patterns: PATTERNS$8,
+  detect(files) {
+    return files.some(isProjectFile);
+  },
+  async collectTaskSurface(root, files) {
+    const candidates = await readCandidates(files, root, PATTERNS$8);
+    const names = /* @__PURE__ */ new Set();
+    const sourceFiles = /* @__PURE__ */ new Set();
+    for (const [relpath, text] of Object.entries(candidates)) {
+      const parsed = parseMsbuildTargets(text);
+      for (const n of parsed) names.add(n);
+      if (parsed.size > 0) sourceFiles.add(relpath);
+    }
+    return { names, sourceFiles };
+  }
+};
+const PATTERNS$7 = ["CMakeLists.txt"];
+const CUSTOM_TARGET = /\badd_custom_target\s*\(\s*([A-Za-z_][A-Za-z0-9_.-]*)/gu;
+const EXECUTABLE = /\badd_executable\s*\(\s*([A-Za-z_][A-Za-z0-9_.-]*)/gu;
+const LIBRARY = /\badd_library\s*\(\s*([A-Za-z_][A-Za-z0-9_.-]*)/gu;
+function parseCmakeTargets(text) {
+  const names = /* @__PURE__ */ new Set();
+  for (const regex of [CUSTOM_TARGET, EXECUTABLE, LIBRARY]) {
+    regex.lastIndex = 0;
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+      names.add(match[1]);
+    }
+  }
+  return names;
+}
+const cmakeAdapter = {
+  id: "cmake",
+  displayName: "CMake",
+  patterns: PATTERNS$7,
+  detect(files) {
+    return files.some((f) => f.split("/").pop()?.toLowerCase() === "cmakelists.txt");
+  },
+  async collectTaskSurface(root, files) {
+    const candidates = await readCandidates(files, root, PATTERNS$7);
+    const names = /* @__PURE__ */ new Set();
+    const sourceFiles = /* @__PURE__ */ new Set();
+    for (const [relpath, text] of Object.entries(candidates)) {
+      const parsed = parseCmakeTargets(text);
+      for (const n of parsed) names.add(n);
+      if (parsed.size > 0) sourceFiles.add(relpath);
+    }
+    return { names, sourceFiles };
+  }
+};
+const PATTERNS$6 = ["composer.json"];
+function parseComposerScripts(text) {
+  const names = /* @__PURE__ */ new Set();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return names;
+  }
+  if (!data || typeof data !== "object") return names;
+  const scripts = data.scripts;
+  if (!scripts || typeof scripts !== "object" || Array.isArray(scripts)) return names;
+  for (const key of Object.keys(scripts)) {
+    names.add(key);
+  }
+  return names;
+}
+const composerAdapter = {
+  id: "composer",
+  displayName: "Composer",
+  patterns: PATTERNS$6,
+  detect(files) {
+    return files.some((f) => f.split("/").pop()?.toLowerCase() === "composer.json");
+  },
+  async collectTaskSurface(root, files) {
+    const candidates = await readCandidates(files, root, PATTERNS$6);
+    const names = /* @__PURE__ */ new Set();
+    const sourceFiles = /* @__PURE__ */ new Set();
+    for (const [relpath, text] of Object.entries(candidates)) {
+      const parsed = parseComposerScripts(text);
+      for (const n of parsed) names.add(n);
+      if (parsed.size > 0) sourceFiles.add(relpath);
+    }
+    return { names, sourceFiles };
+  }
+};
+const PATTERNS$5 = ["Rakefile", "rakefile", "Rakefile.rb", "**/*.rake"];
+const NAMESPACE_OPEN = /^\s*namespace\s+:([A-Za-z_][A-Za-z0-9_]*)\s+do\b/u;
+const NAMESPACE_OPEN_STR = /^\s*namespace\s+["']([A-Za-z_][A-Za-z0-9_]*)["']\s+do\b/u;
+const TASK_SYM = /^\s*task\s+:([A-Za-z_][A-Za-z0-9_]*)\b/u;
+const TASK_STR = /^\s*task\s+["']([A-Za-z_][A-Za-z0-9_]*)["']/u;
+const BLOCK_END = /^\s*end\b/u;
+const BLOCK_OPEN = /\bdo\b(\s*\|[^|]*\|)?\s*$|\{\s*(?:\|[^|]*\|)?\s*$/u;
+const KEYWORD_BLOCK_OPEN = /^\s*(?:def|class|module|if|unless|case|while|until|for|begin)\b/u;
+const ENDLESS_DEF = /^\s*def\s+(?:self\.)?[a-z_][A-Za-z0-9_]*[?!]?\s*(?:\([^)]*\))?\s*=(?!=)/u;
+function parseRakefile(text) {
+  const names = /* @__PURE__ */ new Set();
+  const stack = [];
+  function currentPrefix() {
+    const parts = stack.filter((f) => f.kind === "ns").map((f) => f.name);
+    return parts.length > 0 ? parts.join(":") + ":" : "";
+  }
+  const lines = text.split(/\r?\n/u);
+  for (const raw of lines) {
+    const line = raw.replace(/#.*$/u, "");
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const nsMatch = line.match(NAMESPACE_OPEN) ?? line.match(NAMESPACE_OPEN_STR);
+    if (nsMatch) {
+      stack.push({ kind: "ns", name: nsMatch[1] });
+      continue;
+    }
+    const taskMatch = line.match(TASK_SYM) ?? line.match(TASK_STR);
+    if (taskMatch) {
+      names.add(currentPrefix() + taskMatch[1]);
+      if (BLOCK_OPEN.test(line)) {
+        stack.push({ kind: "other" });
+      }
+      continue;
+    }
+    if (BLOCK_END.test(line)) {
+      if (stack.length > 0) stack.pop();
+      continue;
+    }
+    if (KEYWORD_BLOCK_OPEN.test(line) && !ENDLESS_DEF.test(line) && !/\bend\s*$/u.test(trimmed)) {
+      stack.push({ kind: "other" });
+      continue;
+    }
+    if (BLOCK_OPEN.test(line)) {
+      stack.push({ kind: "other" });
+      continue;
+    }
+  }
+  return names;
+}
+function isRakeFile(relpath) {
+  const base = relpath.split("/").pop() ?? "";
+  const lower = base.toLowerCase();
+  if (lower === "rakefile" || lower === "rakefile.rb") return true;
+  return lower.endsWith(".rake");
+}
+const rakeAdapter = {
+  id: "rake",
+  displayName: "rake",
+  patterns: PATTERNS$5,
+  detect(files) {
+    return files.some(isRakeFile);
+  },
+  async collectTaskSurface(root, files) {
+    const rakeFiles = files.filter(isRakeFile);
+    const candidates = await readCandidates(rakeFiles, root, rakeFiles);
+    const names = /* @__PURE__ */ new Set();
+    const sourceFiles = /* @__PURE__ */ new Set();
+    for (const [relpath, text] of Object.entries(candidates)) {
+      const parsed = parseRakefile(text);
+      for (const n of parsed) names.add(n);
+      if (parsed.size > 0) sourceFiles.add(relpath);
+    }
+    return { names, sourceFiles };
+  }
+};
+const PATTERNS$4 = [
+  "**/xcshareddata/xcschemes/*.xcscheme",
+  "Fastfile",
+  "fastlane/Fastfile"
+];
+const LANE = /^\s*lane\s+:([A-Za-z_][A-Za-z0-9_]*)\s+do\b/u;
+function parseFastfileLanes(text) {
+  const names = /* @__PURE__ */ new Set();
+  for (const raw of text.split(/\r?\n/u)) {
+    const line = raw.replace(/#.*$/u, "");
+    const match = line.match(LANE);
+    if (match) names.add(match[1]);
+  }
+  return names;
+}
+function parseXcodeSchemeFilenames(files) {
+  const names = /* @__PURE__ */ new Set();
+  for (const f of files) {
+    if (!f.includes("/xcshareddata/xcschemes/")) continue;
+    const base = f.split("/").pop() ?? "";
+    if (!base.toLowerCase().endsWith(".xcscheme")) continue;
+    const stem = base.slice(0, -".xcscheme".length);
+    if (stem) names.add(stem);
+  }
+  return names;
+}
+function isFastfile(relpath) {
+  const base = relpath.split("/").pop()?.toLowerCase() ?? "";
+  return base === "fastfile";
+}
+function isScheme(relpath) {
+  return relpath.includes("/xcshareddata/xcschemes/") && relpath.toLowerCase().endsWith(".xcscheme");
+}
+const xcodeAdapter = {
+  id: "xcode",
+  displayName: "Xcode",
+  patterns: PATTERNS$4,
+  detect(files) {
+    return files.some((f) => isFastfile(f) || isScheme(f) || f.includes(".xcodeproj/"));
+  },
+  async collectTaskSurface(root, files) {
+    const names = /* @__PURE__ */ new Set();
+    const sourceFiles = /* @__PURE__ */ new Set();
+    for (const scheme of parseXcodeSchemeFilenames(files)) {
+      names.add(scheme);
+    }
+    for (const f of files) {
+      if (isScheme(f)) sourceFiles.add(f);
+    }
+    const fastfiles = files.filter(isFastfile);
+    const candidates = await readCandidates(fastfiles, root, fastfiles);
+    for (const [relpath, text] of Object.entries(candidates)) {
+      const parsed = parseFastfileLanes(text);
+      for (const n of parsed) names.add(n);
+      if (parsed.size > 0) sourceFiles.add(relpath);
+    }
+    return { names, sourceFiles };
+  }
+};
+const PATTERNS$3 = ["nx.json", "project.json"];
+function parseNxTargets(text) {
+  const names = /* @__PURE__ */ new Set();
+  try {
+    const parsed = JSON.parse(text);
+    if (typeof parsed !== "object" || parsed === null) return names;
+    const obj = parsed;
+    const targets = obj.targets;
+    if (targets && typeof targets === "object" && !Array.isArray(targets)) {
+      for (const key of Object.keys(targets)) {
+        names.add(key);
+      }
+    }
+    const targetDefaults = obj.targetDefaults;
+    if (targetDefaults && typeof targetDefaults === "object" && !Array.isArray(targetDefaults)) {
+      for (const key of Object.keys(targetDefaults)) {
+        names.add(key);
+      }
+    }
+  } catch (_error) {
+    return names;
+  }
+  return names;
+}
+const nxAdapter = {
+  id: "nx",
+  displayName: "Nx",
+  patterns: PATTERNS$3,
+  detect(files) {
+    return files.some((f) => {
+      const base = f.split("/").pop()?.toLowerCase();
+      return base === "nx.json" || base === "project.json";
+    });
+  },
+  async collectTaskSurface(root, files) {
+    const candidates = await readCandidates(files, root, PATTERNS$3);
+    const names = /* @__PURE__ */ new Set();
+    const sourceFiles = /* @__PURE__ */ new Set();
+    for (const [relpath, text] of Object.entries(candidates)) {
+      const parsed = parseNxTargets(text);
+      for (const n of parsed) names.add(n);
+      if (parsed.size > 0) sourceFiles.add(relpath);
+    }
+    return { names, sourceFiles };
+  }
+};
+const PATTERNS$2 = ["turbo.json"];
+function parseTurboTasks(text) {
+  const names = /* @__PURE__ */ new Set();
+  try {
+    const parsed = JSON.parse(text);
+    if (typeof parsed !== "object" || parsed === null) return names;
+    const obj = parsed;
+    for (const key of ["pipeline", "tasks"]) {
+      const value = obj[key];
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        for (const taskKey of Object.keys(value)) {
+          names.add(taskKey);
+          const hashIdx = taskKey.indexOf("#");
+          if (hashIdx !== -1) {
+            const stripped = taskKey.slice(hashIdx + 1);
+            if (stripped) names.add(stripped);
+          }
+        }
+      }
+    }
+  } catch (_error) {
+    return names;
+  }
+  return names;
+}
+const turboAdapter = {
+  id: "turbo",
+  displayName: "Turbo",
+  patterns: PATTERNS$2,
+  detect(files) {
+    return files.some((f) => f.split("/").pop()?.toLowerCase() === "turbo.json");
+  },
+  async collectTaskSurface(root, files) {
+    const candidates = await readCandidates(files, root, PATTERNS$2);
+    const names = /* @__PURE__ */ new Set();
+    const sourceFiles = /* @__PURE__ */ new Set();
+    for (const [relpath, text] of Object.entries(candidates)) {
+      const parsed = parseTurboTasks(text);
+      for (const n of parsed) names.add(n);
+      if (parsed.size > 0) sourceFiles.add(relpath);
+    }
+    return { names, sourceFiles };
+  }
+};
+const PATTERNS$1 = [".mise.toml", "mise.toml"];
+function parseMiseTasks(text) {
+  const names = /* @__PURE__ */ new Set();
+  const lines = text.split(/\r?\n/u);
+  for (const line of lines) {
+    const match = line.match(/^\s*\[tasks\.([A-Za-z0-9_:.-]+)\]\s*(?:#.*)?$/u);
+    if (match) {
+      names.add(match[1]);
+    }
+  }
+  const inlineTableSection = text.match(/^\s*\[tasks\]\s*$/mu);
+  if (inlineTableSection) {
+    const startIndex = inlineTableSection.index ?? 0;
+    const after = text.slice(startIndex).split(/\r?\n/u).slice(1);
+    for (const line of after) {
+      if (/^\s*\[/.test(line)) break;
+      const m = line.match(/^\s*([A-Za-z0-9_:.-]+)\s*=/u);
+      if (m) names.add(m[1]);
+    }
+  }
+  return names;
+}
+const miseAdapter = {
+  id: "mise",
+  displayName: "mise",
+  patterns: PATTERNS$1,
+  detect(files) {
+    return files.some((f) => {
+      const base = f.split("/").pop()?.toLowerCase();
+      return base === ".mise.toml" || base === "mise.toml";
+    });
+  },
+  async collectTaskSurface(root, files) {
+    const candidates = await readCandidates(files, root, PATTERNS$1);
+    const names = /* @__PURE__ */ new Set();
+    const sourceFiles = /* @__PURE__ */ new Set();
+    for (const [relpath, text] of Object.entries(candidates)) {
+      const parsed = parseMiseTasks(text);
+      for (const n of parsed) names.add(n);
+      if (parsed.size > 0) sourceFiles.add(relpath);
+    }
+    return { names, sourceFiles };
+  }
+};
+const PATTERNS = ["mix.exs"];
+const BUILTIN_MIX_TASKS = [
+  "compile",
+  "deps.get",
+  "deps.update",
+  "deps.compile",
+  "test",
+  "format",
+  "release",
+  "phx.server",
+  "phx.routes",
+  "ecto.create",
+  "ecto.migrate",
+  "ecto.rollback",
+  "run",
+  "new",
+  "help"
+];
+function deriveMixTaskName(relpath) {
+  const base = path.posix.basename(relpath);
+  if (!base.endsWith(".ex")) return null;
+  const stem = base.slice(0, -3);
+  if (!stem) return null;
+  return stem;
+}
+const mixAdapter = {
+  id: "mix",
+  displayName: "Mix (Elixir)",
+  patterns: PATTERNS,
+  detect(files) {
+    return files.some((f) => f.split("/").pop()?.toLowerCase() === "mix.exs");
+  },
+  async collectTaskSurface(_root, files) {
+    const names = /* @__PURE__ */ new Set();
+    const sourceFiles = /* @__PURE__ */ new Set();
+    const mixFiles = findFiles(files, "mix.exs");
+    if (mixFiles.length === 0) {
+      return { names, sourceFiles };
+    }
+    for (const t of BUILTIN_MIX_TASKS) names.add(t);
+    const taskFiles = files.filter((relpath) => {
+      return /(^|\/)lib\/mix\/tasks\/[^/]+\.ex$/u.test(relpath);
+    });
+    for (const taskFile of taskFiles) {
+      const name = deriveMixTaskName(taskFile);
+      if (name) names.add(name);
+    }
+    for (const f of mixFiles) sourceFiles.add(f);
+    return { names, sourceFiles };
+  }
+};
+const ALL_ADAPTERS = [
+  javascriptAdapter,
+  makeAdapter,
+  justAdapter,
+  taskfileAdapter,
+  rustAdapter,
+  pythonAdapter,
+  gradleAdapter,
+  mavenAdapter,
+  dotnetAdapter,
+  cmakeAdapter,
+  composerAdapter,
+  rakeAdapter,
+  xcodeAdapter,
+  nxAdapter,
+  turboAdapter,
+  miseAdapter,
+  mixAdapter
+];
+const TASK_FILE_PATTERNS = ALL_ADAPTERS.flatMap((a) => a.patterns);
+const MANIFEST_FILE_NAMES = /* @__PURE__ */ new Set([
+  "build.gradle",
+  "build.gradle.kts",
+  "cargo.toml",
+  "cmakelists.txt",
+  "composer.json",
+  "fastfile",
+  "gemfile",
+  "go.mod",
+  "mix.exs",
+  "package.json",
+  "pom.xml",
+  "pyproject.toml",
+  "rakefile",
+  "requirements.txt",
+  "setup.py",
+  "tox.ini",
+  "nx.json",
+  "project.json",
+  "turbo.json"
+]);
+async function collectAllTaskSurfaces(root, files) {
+  const task_surface = /* @__PURE__ */ new Set();
+  const task_surface_files = /* @__PURE__ */ new Set();
+  for (const adapter of ALL_ADAPTERS) {
+    const result = await adapter.collectTaskSurface(root, files);
+    for (const n of result.names) task_surface.add(n);
+    for (const f of result.sourceFiles) task_surface_files.add(f);
+  }
+  const entrypoint_files = findFiles(files, ...TASK_FILE_PATTERNS);
+  return { task_surface, task_surface_files, entrypoint_files };
+}
+async function collectTaskSurfaceByRunner(root, files) {
+  const result = {};
+  for (const adapter of ALL_ADAPTERS) {
+    const surface = await adapter.collectTaskSurface(root, files);
+    result[adapter.id] = surface.names;
+  }
+  return result;
+}
+function categorizeTaskSurface(taskSurface) {
+  const categories = /* @__PURE__ */ new Map();
+  function add(category, name) {
+    if (!categories.has(category)) categories.set(category, /* @__PURE__ */ new Set());
+    categories.get(category).add(name);
+  }
+  for (const name of Array.from(taskSurface).sort()) {
+    const lower = name.toLowerCase();
+    if (["setup", "bootstrap", "install", "init"].includes(lower) || /^(setup|bootstrap|install|init):/u.test(lower)) {
+      add("setup", name);
+    }
+    if (["dev", "start", "serve", "tauri"].includes(lower) || /^(dev|start|serve):/u.test(lower)) {
+      add("dev", name);
+    }
+    if (lower === "build" || /^(build|bundle|compile|package):/u.test(lower)) {
+      add("build", name);
+    }
+    if (lower === "test" || lower.startsWith("test:") || ["integration", "e2e", "smoke"].includes(lower) || /^(integration|e2e|smoke):/u.test(lower)) {
+      add("test", name);
+    }
+    if (["ci", "check"].includes(lower) || /^(ci|check):/u.test(lower)) {
+      add("check", name);
+    }
+    if (["typecheck", "type-check"].includes(lower) || /^(typecheck|type-check):/u.test(lower)) {
+      add("check", name);
+    }
+    if (lower === "standards" || lower.startsWith("standards:")) {
+      add("lint", name);
+      add("check", name);
+    }
+    if (lower === "lint" || lower.startsWith("lint:") || lower.endsWith(":lint") || lower.includes(":lint:")) {
+      add("lint", name);
+    }
+    if (["eslint", "stylelint", "markdownlint", "commitlint", "rust:lint"].includes(lower)) {
+      add("lint", name);
+    }
+    if (/^(eslint|stylelint|markdownlint|commitlint|rust:lint):/u.test(lower)) {
+      add("lint", name);
+    }
+    if (/^(lint[-_])/u.test(lower) || lower.includes("clippy")) {
+      add("lint", name);
+    }
+    if (/(^|[:_-])fmt($|[:_-])/u.test(lower)) {
+      if (lower.includes("fix") || /^(fix[-_])/u.test(lower)) {
+        add("format", name);
+      } else {
+        add("lint", name);
+      }
+    }
+    if (["format", "fmt"].includes(lower) || /^(format|fmt):/u.test(lower)) {
+      add("format", name);
+    }
+    if (lower.endsWith(":fix") || lower.includes(":fix:") || /^(fix[-_])/u.test(lower)) {
+      add("format", name);
+    }
+  }
+  return Object.fromEntries(Array.from(categories.entries(), ([category, names]) => {
+    return [category, Array.from(names).sort()];
+  }));
+}
+const MAX_EVIDENCE = 5;
+const ROOT_SCOPE = ".";
+const AGENT_DOC_NAMES = /* @__PURE__ */ new Set(["agents.md", "claude.md", "copilot-instructions.md"]);
+const ROOT_AGENT_DOC_PATHS = /* @__PURE__ */ new Set(["AGENTS.md", "CLAUDE.md", ".github/copilot-instructions.md"]);
+const CORE_DOC_NAMES = /* @__PURE__ */ new Set([
+  "agents.md",
+  "claude.md",
+  "contributing.md",
+  "copilot-instructions.md",
+  "readme.md",
+  "readme.mdx"
+]);
+const METRIC_NAMES = [
+  "bootstrap_self_sufficiency",
+  "task_entrypoints",
+  "validation_harness",
+  "lint_format_gates",
+  "guardrails_and_hooks",
+  "agent_repo_map",
+  "structured_docs",
+  "decision_records"
+];
+const ROOT_MAP_DOCS = [
+  "AGENTS.md",
+  "CLAUDE.md",
+  ".github/copilot-instructions.md",
+  "CONTRIBUTING.md",
+  "README.md"
+];
+const GENERIC_NESTED_SCOPE_SEGMENTS = [
+  /^docs?$/u,
+  /^examples?$/u,
+  /^demos?([_-].+)?$/u,
+  /^benchmarks?$/u,
+  /^tests?([_-].+)?$/u,
+  /^tutorials?$/u,
+  /^samples?$/u,
+  /^fixtures?$/u,
+  /^__tests__$/u,
+  /^\.[a-z0-9_-]+$/u
+];
+function normalizeScope(root, scope) {
+  const scopePath = path.resolve(root, scope);
+  const relative = path.relative(root, scopePath);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error(`Scope path must stay inside the repository root: ${scope}`);
+  }
+  const normalized = toPosix(relative);
+  return normalized || ROOT_SCOPE;
+}
+function rootRoutesToScope(rootReadme, scope) {
+  return rootReadme.includes(`${scope}/`) || rootReadme.includes(`\`${scope}\``) || rootReadme.includes(`cd ${scope}`);
+}
+function clipEvidence(items, limit = MAX_EVIDENCE) {
+  const seen = /* @__PURE__ */ new Set();
+  const unique = [];
+  for (const item of items) {
+    if (!seen.has(item)) {
+      seen.add(item);
+      unique.push(item);
+    }
+  }
+  return unique.slice(0, limit);
+}
+function metric(score, confidence, evidence, gaps, nextStep) {
+  return {
+    score,
+    confidence,
+    evidence: clipEvidence(evidence),
+    gaps,
+    next_step: nextStep
+  };
+}
+function setDefault(map, key) {
+  if (!map.has(key)) {
+    map.set(key, /* @__PURE__ */ new Set());
+  }
+  return map.get(key);
+}
+function hasSignal(signals, prefix) {
+  return Array.from(signals).some((signal) => signal.startsWith(prefix));
+}
+function scoreScopeSignals(signals) {
+  let score = 0;
+  if (hasSignal(signals, "agent_doc:")) score += 4;
+  if (hasSignal(signals, "task_surface:")) score += 2;
+  if (hasSignal(signals, "manifest:")) score += 2;
+  if (hasSignal(signals, "scope_readme:")) score += 1;
+  if (hasSignal(signals, "root_routes_here:")) score += 1;
+  return score;
+}
+function isLikelyNestedUtilityScope(scope, signals) {
+  if (hasSignal(signals, "agent_doc:") || hasSignal(signals, "root_routes_here:")) {
+    return false;
+  }
+  const parts = scope.split("/");
+  if (parts.length < 3) {
+    return false;
+  }
+  return parts.slice(1).some((part) => {
+    return GENERIC_NESTED_SCOPE_SEGMENTS.some((pattern) => pattern.test(part));
+  });
+}
+async function collectContext(root, excludes) {
+  const files = await walkRepo(root, excludes);
+  const relpaths = new Set(files);
+  const docs = files.filter((filePath) => {
+    return DOC_EXTENSIONS.has(path.extname(filePath).toLowerCase());
+  });
+  const docTexts = {};
+  for (const relpath of docs) {
+    const basename = path.posix.basename(relpath).toLowerCase();
+    if (CORE_DOC_NAMES.has(basename) || relpath.startsWith("docs/")) {
+      docTexts[relpath] = await readText(path.join(root, relpath));
+    }
+  }
+  const surface = await collectAllTaskSurfaces(root, files);
+  return {
+    root,
+    files,
+    relpaths,
+    doc_paths: docs,
+    doc_texts: docTexts,
+    task_surface: surface.task_surface,
+    task_surface_files: surface.task_surface_files,
+    entrypoint_files: surface.entrypoint_files
+  };
+}
+function discoverScopes(ctx) {
+  const relpaths = Array.from(ctx.relpaths).sort();
+  const rootReadme = (ctx.doc_texts["README.md"] || ctx.doc_texts["README.mdx"] || "").toLowerCase();
+  const signalsByScope = /* @__PURE__ */ new Map();
+  for (const relpath of relpaths) {
+    const parts = relpath.split("/");
+    if (parts.length < 2) continue;
+    const directScope = parts.slice(0, -1).join("/");
+    const filename = parts[parts.length - 1].toLowerCase();
+    if (AGENT_DOC_NAMES.has(filename)) {
+      setDefault(signalsByScope, directScope).add(`agent_doc:${parts[parts.length - 1]}`);
+    }
+    if (filename === "readme.md") {
+      setDefault(signalsByScope, directScope).add("scope_readme:README.md");
+    }
+    const signals = setDefault(signalsByScope, directScope);
+    if (ctx.task_surface_files.has(relpath)) {
+      signals.add(`task_surface:${parts[parts.length - 1]}`);
+    }
+    if (MANIFEST_FILE_NAMES.has(filename)) {
+      signals.add(`manifest:${parts[parts.length - 1]}`);
+    }
+    if (rootRoutesToScope(rootReadme, directScope)) {
+      signals.add("root_routes_here:README.md");
+    }
+  }
+  const candidates = [];
+  for (const [scope, signals] of signalsByScope.entries()) {
+    const score = scoreScopeSignals(signals);
+    const strongSignal = hasSignal(signals, "agent_doc:") || hasSignal(signals, "task_surface:") || hasSignal(signals, "manifest:");
+    if (score >= 3 && strongSignal && !isLikelyNestedUtilityScope(scope, signals)) {
+      candidates.push({ path: scope, signals: Array.from(signals).sort(), score });
+    }
+  }
+  return candidates.sort((left, right) => {
+    return right.score - left.score || left.path.localeCompare(right.path);
+  });
+}
+function chooseScope(ctx, explicitScope = void 0) {
+  const discovered = discoverScopes(ctx);
+  if (explicitScope) {
+    return [explicitScope, discovered, "explicit"];
+  }
+  const topLevelAgentDoc = Array.from(ROOT_AGENT_DOC_PATHS).some((candidate) => {
+    return ctx.relpaths.has(candidate);
+  });
+  const strongCandidates = discovered.filter((candidate) => candidate.score >= 5);
+  if (strongCandidates.length === 1 && !topLevelAgentDoc) {
+    return [strongCandidates[0].path, discovered, "auto_single_nested_scope"];
+  }
+  if (strongCandidates.length >= 2) {
+    return [ROOT_SCOPE, discovered, "root_multiple_nested_scopes"];
+  }
+  return [ROOT_SCOPE, discovered, "root_default"];
+}
+async function scoreBootstrap(ctx) {
+  const taskCategories = categorizeTaskSurface(ctx.task_surface);
+  const declarative = Array.from(ctx.relpaths).filter((relpath) => {
+    return [
+      "devcontainer.json",
+      ".devcontainer/devcontainer.json",
+      "docker-compose.yml",
+      "docker-compose.yaml",
+      "compose.yml",
+      "compose.yaml",
+      "flake.nix",
+      "shell.nix",
+      "mise.toml",
+      ".tool-versions",
+      "Brewfile"
+    ].includes(relpath) || relpath.startsWith(".devcontainer/");
+  }).sort();
+  const runtimePins = Array.from(ctx.relpaths).filter((relpath) => {
+    return [
+      ".python-version",
+      ".nvmrc",
+      ".node-version",
+      ".ruby-version",
+      ".java-version",
+      "rust-toolchain.toml"
+    ].includes(relpath);
+  }).sort();
+  const lockfiles = Array.from(ctx.relpaths).filter((relpath) => {
+    return [
+      "package-lock.json",
+      "pnpm-lock.yaml",
+      "yarn.lock",
+      "poetry.lock",
+      "Pipfile.lock",
+      "uv.lock",
+      "Cargo.lock",
+      "go.sum",
+      "Gemfile.lock"
+    ].includes(path.posix.basename(relpath));
+  }).sort();
+  const bootstrapCommands = Array.from(/* @__PURE__ */ new Set([
+    ...taskCategories.setup || [],
+    ...taskCategories.dev || []
+  ])).sort();
+  const categories = [declarative, runtimePins, lockfiles, bootstrapCommands].filter((group) => group.length > 0).length;
+  const evidence = [
+    ...declarative,
+    ...runtimePins,
+    ...lockfiles,
+    ...bootstrapCommands.map((name) => `task:${name}`)
+  ];
+  if (declarative.length > 0 && bootstrapCommands.length > 0 && (runtimePins.length > 0 || lockfiles.length > 0)) {
+    return metric(3, "high", evidence, "Little obvious setup debt from repo-visible signals.", "Keep one canonical bootstrap command and keep manifests pinned.");
+  }
+  if (categories >= 2) {
+    return metric(2, "medium", evidence, "Setup is partly declared, but the repo does not advertise one clearly dominant bootstrap path.", "Add a canonical `setup` or `bootstrap` entrypoint and point docs at it.");
+  }
+  if (categories === 1) {
+    return metric(1, "medium", evidence, "Some setup signals exist, but an agent still has to infer too much about the environment.", "Add declarative environment files or a single bootstrap command.");
+  }
+  return metric(0, "high", evidence, "No strong repo-visible bootstrap path was found.", "Declare the toolchain and local services in version control and expose a `setup` task.");
+}
+async function scoreTaskEntrypoints(ctx) {
+  const taskCategories = categorizeTaskSurface(ctx.task_surface);
+  const matchedCategories = ["setup", "dev", "build", "test", "lint", "format", "check"].filter((category) => {
+    return (taskCategories[category] || []).length > 0;
+  });
+  const evidence = [
+    ...ctx.entrypoint_files,
+    ...["setup", "dev", "build", "test", "lint", "format", "check"].flatMap((category) => {
+      return (taskCategories[category] || []).map((name) => `task:${name}`);
+    })
+  ];
+  const hasSetup = Boolean((taskCategories.setup || []).length > 0 || (taskCategories.dev || []).length > 0);
+  const hasValidation = Boolean((taskCategories.test || []).length > 0 || (taskCategories.lint || []).length > 0 || (taskCategories.check || []).length > 0);
+  const hasBuild = Boolean((taskCategories.build || []).length > 0);
+  if (matchedCategories.length >= 5 && hasSetup && hasValidation && hasBuild) {
+    return metric(3, "high", evidence, "Common workflows appear to have stable entrypoints.", "Keep entrypoint names consistent across docs and CI.");
+  }
+  if (matchedCategories.length >= 3) {
+    return metric(2, "high", evidence, "Several common tasks are exposed, but the task surface is not yet complete.", "Expose `setup`, `dev`, `test`, `lint`, and `build` through one canonical task layer.");
+  }
+  if (ctx.entrypoint_files.length > 0 || matchedCategories.length > 0) {
+    return metric(1, "medium", evidence, "Some task entrypoints exist, but coverage is narrow or inconsistent.", "Add a single command surface such as `make`, `just`, `task`, or package scripts for routine work.");
+  }
+  return metric(0, "high", evidence, "No canonical task surface was detected.", "Add repo-level entrypoints for setup, validation, and build tasks.");
+}
+async function scoreValidationHarness(ctx) {
+  const taskCategories = categorizeTaskSurface(ctx.task_surface);
+  const testDirs = Array.from(ctx.relpaths).filter((relpath) => {
+    return /(^|\/)(tests?|__tests__|spec|specs|integration|e2e|cypress|playwright|testdata|fixtures)(\/|$)/u.test(relpath);
+  }).sort();
+  const testConfigs = Array.from(ctx.relpaths).filter((relpath) => {
+    const basename = path.posix.basename(relpath);
+    return basename === "pytest.ini" || basename === "tox.ini" || /^jest\.config\./u.test(basename) || /^vitest\.config\./u.test(basename) || /^playwright\.config\./u.test(basename) || /^cypress\.config\./u.test(basename);
+  }).sort();
+  const testCommands = Array.from(/* @__PURE__ */ new Set([
+    ...taskCategories.test || [],
+    ...taskCategories.check || []
+  ])).sort();
+  const layered = testDirs.some((relpath) => {
+    return ["integration", "e2e", "cypress", "playwright"].some((part) => relpath.includes(part));
+  });
+  const fixtures = testDirs.some((relpath) => {
+    return ["fixtures", "testdata"].some((part) => relpath.includes(part));
+  });
+  const evidence = [
+    ...testDirs,
+    ...testConfigs,
+    ...testCommands.map((name) => `task:${name}`)
+  ];
+  if ((testDirs.length > 0 || testConfigs.length > 0) && testCommands.length > 0 && (layered || fixtures)) {
+    return metric(3, "high", evidence, "The repo appears to support more than one validation layer or reusable test state.", "Keep smoke or integration coverage aligned with the most common change types.");
+  }
+  if ((testDirs.length > 0 || testConfigs.length > 0) && testCommands.length > 0) {
+    return metric(2, "high", evidence, "The repo has a credible local validation path for ordinary changes.", "Add smoke, integration, or e2e coverage for cross-cutting changes.");
+  }
+  if (testDirs.length > 0 || testConfigs.length > 0 || testCommands.length > 0) {
+    return metric(1, "medium", evidence, "Some validation signals exist, but the harness looks narrow or hard to trust end-to-end.", "Add a canonical `test` or `check` command and keep tests in predictable locations.");
+  }
+  return metric(0, "high", evidence, "No meaningful local validation harness was detected.", "Add a basic test or smoke-test path that an agent can run after changes.");
+}
+async function scoreLintFormat(ctx) {
+  const taskCategories = categorizeTaskSurface(ctx.task_surface);
+  const lintFiles = Array.from(ctx.relpaths).filter((relpath) => {
+    return (/* @__PURE__ */ new Set([
+      ".eslintrc",
+      ".eslintrc.js",
+      ".eslintrc.cjs",
+      ".eslintrc.json",
+      ".eslintrc.yml",
+      ".eslintrc.yaml",
+      "eslint.config.js",
+      "eslint.config.cjs",
+      "eslint.config.mjs",
+      ".golangci.yml",
+      ".golangci.yaml",
+      ".markdownlint.json",
+      ".markdownlint.yaml",
+      ".markdownlint.yml",
+      ".markdownlint-cli2.cjs",
+      "ruff.toml",
+      ".ruff.toml",
+      ".stylelintrc",
+      ".stylelintrc.js",
+      ".stylelintrc.cjs",
+      ".stylelintrc.json",
+      ".stylelintrc.yml",
+      ".stylelintrc.yaml",
+      "stylelint.config.js",
+      "stylelint.config.cjs",
+      "commitlint.config.cjs"
+    ])).has(path.posix.basename(relpath));
+  }).sort();
+  const formatFiles = Array.from(ctx.relpaths).filter((relpath) => {
+    return (/* @__PURE__ */ new Set([
+      ".prettierrc",
+      ".prettierrc.json",
+      ".prettierrc.yml",
+      ".prettierrc.yaml",
+      "prettier.config.js",
+      "prettier.config.cjs",
+      "rustfmt.toml",
+      ".rustfmt.toml",
+      ".editorconfig"
+    ])).has(path.posix.basename(relpath));
+  }).sort();
+  if (ctx.relpaths.has("pyproject.toml")) {
+    const pyprojectText = await readText(path.join(ctx.root, "pyproject.toml"));
+    if (["[tool.ruff", "[tool.black", "[tool.isort"].some((token) => pyprojectText.includes(token))) {
+      lintFiles.push("pyproject.toml");
+    }
+    if (["[tool.black", "[tool.ruff.format"].some((token) => pyprojectText.includes(token))) {
+      formatFiles.push("pyproject.toml");
+    }
+  }
+  const extra = [];
+  if (ctx.relpaths.has(".pre-commit-config.yaml") || ctx.relpaths.has(".pre-commit-config.yml")) {
+    extra.push(".pre-commit-config.yaml");
+  }
+  if (ctx.relpaths.has(".gitlab-ci.yml")) {
+    extra.push(".gitlab-ci.yml");
+  }
+  const githubWorkflows = Array.from(ctx.relpaths).filter((relpath) => relpath.startsWith(".github/workflows/")).sort().slice(0, 2);
+  extra.push(...githubWorkflows);
+  const lintCommands = Array.from(/* @__PURE__ */ new Set([
+    ...taskCategories.lint || [],
+    ...taskCategories.check || []
+  ])).sort();
+  const formatCommands = [...taskCategories.format || []].sort();
+  const evidence = [
+    ...lintFiles,
+    ...formatFiles,
+    ...lintCommands.map((name) => `task:${name}`),
+    ...formatCommands.map((name) => `task:${name}`),
+    ...extra
+  ];
+  if (lintFiles.length > 0 && formatFiles.length > 0 && (lintCommands.length > 0 || formatCommands.length > 0) && extra.length > 0) {
+    return metric(3, "high", evidence, "Static checks look integrated into the repository workflow.", "Keep lint and format commands stable and easy to run locally.");
+  }
+  if ((lintFiles.length > 0 || formatFiles.length > 0) && (lintCommands.length > 0 || formatCommands.length > 0)) {
+    return metric(2, "high", evidence, "The repo has usable lint or format gates, but enforcement signals are still modest.", "Add both lint and format entrypoints and wire them into pre-commit or repo-local CI workflows.");
+  }
+  if (lintFiles.length > 0 || formatFiles.length > 0 || lintCommands.length > 0 || formatCommands.length > 0) {
+    return metric(1, "medium", evidence, "Lint or format tooling exists, but the workflow is incomplete or weakly surfaced.", "Expose `lint` and `format` commands through the canonical task surface.");
+  }
+  return metric(0, "high", evidence, "No lint or format gates were detected.", "Add at least one linter and formatter with explicit repo-level commands.");
+}
+async function scoreGuardrailsAndHooks(ctx) {
+  const families = {
+    "pre-commit": [],
+    lefthook: [],
+    "husky/githooks": [],
+    "agent-hooks": []
+  };
+  for (const relpath of ctx.relpaths) {
+    if (relpath === ".pre-commit-config.yaml" || relpath === ".pre-commit-config.yml") {
+      families["pre-commit"].push(relpath);
+    }
+    if (relpath === "lefthook.yml" || relpath === "lefthook.yaml" || relpath === ".lefthook.yml") {
+      families.lefthook.push(relpath);
+    }
+    if (relpath.startsWith(".husky/") || relpath.startsWith(".githooks/")) {
+      families["husky/githooks"].push(relpath);
+    }
+    if (relpath.startsWith(".claude/hooks/")) {
+      families["agent-hooks"].push(relpath);
+    }
+  }
+  const presentFamilies = Object.entries(families).filter(([, files]) => files.length > 0);
+  const evidence = presentFamilies.flatMap(([, files]) => files).slice(0, MAX_EVIDENCE);
+  if (presentFamilies.length >= 2) {
+    return metric(
+      3,
+      "high",
+      evidence,
+      "The repository looks like it has layered mechanical enforcement.",
+      "Keep hook configs healthy and audit them when adding new tools."
+    );
+  }
+  if (presentFamilies.length === 1) {
+    return metric(
+      2,
+      "high",
+      evidence,
+      "A single hooks family enforces guardrails; consider adding another for redundancy.",
+      "Add another layer such as `.pre-commit-config.yaml` or `lefthook.yml` so guardrails survive a missing local install."
+    );
+  }
+  return metric(
+    0,
+    "high",
+    evidence,
+    "No mechanical hooks found.",
+    "Add `pre-commit`, `lefthook`, `husky`, or `.claude/hooks/` so common mistakes fail loudly before commit."
+  );
+}
+async function scoreAgentRepoMap(ctx) {
+  const repoWideAgentDocs = Array.from(ROOT_AGENT_DOC_PATHS).filter((candidate) => ctx.relpaths.has(candidate)).sort();
+  const rootSupportDocs = Array.from(ctx.relpaths).filter((relpath) => ["CONTRIBUTING.md", "README.md"].includes(relpath)).sort();
+  const nestedAgentDocs = Array.from(ctx.relpaths).filter((relpath) => relpath.includes("/") && AGENT_DOC_NAMES.has(path.posix.basename(relpath).toLowerCase())).sort();
+  const evidence = [
+    ...repoWideAgentDocs,
+    ...rootSupportDocs.slice(0, 2),
+    ...nestedAgentDocs.slice(0, 2)
+  ];
+  let mapText = "";
+  for (const candidate of ROOT_MAP_DOCS) {
+    if (ctx.doc_texts[candidate]) {
+      mapText = ctx.doc_texts[candidate];
+      if (mapText) break;
+    }
+  }
+  const cueMatches = ["command", "setup", "docs", "architecture", "test", "constraint", "workflow"].filter((token) => mapText.toLowerCase().includes(token)).length;
+  const repoMapBonus = ["docs/repo-map.md", "docs/architecture.md", "ARCHITECTURE.md"].some((candidate) => ctx.relpaths.has(candidate)) ? 1 : 0;
+  const cues = cueMatches + repoMapBonus;
+  const hasAgentDoc = repoWideAgentDocs.length > 0;
+  const hasNestedAgentDoc = nestedAgentDocs.length > 0;
+  const rootText = ROOT_MAP_DOCS.map((candidate) => ctx.doc_texts[candidate] || "").join("\n").toLowerCase();
+  const nestedGuidesAreSurfaced = nestedAgentDocs.some((nestedDoc) => {
+    return rootText.includes(nestedDoc.toLowerCase()) || rootRoutesToScope(rootText, path.posix.dirname(nestedDoc).toLowerCase());
+  });
+  if (hasAgentDoc && cues >= 3) {
+    return metric(3, "high", evidence, "The repo includes a repo-wide navigation aid for agents with actionable cues.", "Keep the repo map short and link outward to deeper docs instead of duplicating them.");
+  }
+  if (hasAgentDoc) {
+    return metric(2, "medium", evidence, "A repo-wide agent guide exists, but it does not yet look like a crisp map of commands, docs, and constraints.", "Tighten the top-level agent guide so it indexes the primary commands, docs, architecture, and validation paths.");
+  }
+  if (hasNestedAgentDoc && nestedGuidesAreSurfaced) {
+    return metric(2, "medium", evidence, "The repo routes some work through nested scopes with subtree-only agent guidance, but the root still lacks a single repo-wide map.", "Add a short top-level repo map that points to the nested scope guides and their primary commands.");
+  }
+  if (ctx.relpaths.has("README.md") && cues >= 2) {
+    return metric(1, "medium", evidence, "The root docs provide some navigation help, but they do not clearly distinguish repo-wide guidance from subtree-specific workflows.", "Add an `AGENTS.md` or equivalent short index linking commands, docs, constraints, and nested scope guides.");
+  }
+  if (hasNestedAgentDoc) {
+    return metric(1, "medium", evidence, "Nested agent guidance exists, but it is not surfaced clearly from the repository root.", "Link the nested scope guides from the root README or add a short top-level AGENTS.md.");
+  }
+  if (evidence.length > 0) {
+    return metric(1, "medium", evidence, "Some onboarding docs exist, but the repo lacks a concise map optimized for agent navigation.", "Write a short repo map that points to setup, validation, and architecture docs.");
+  }
+  return metric(0, "high", evidence, "No obvious repo map or contributor guide was detected.", "Add `AGENTS.md` with the primary commands, docs, and navigation tips.");
+}
+async function scoreStructuredDocs(ctx) {
+  const docCount = ctx.doc_paths.length;
+  const docsDirFiles = [...ctx.doc_paths].filter((relpath) => relpath.startsWith("docs/")).sort();
+  const docsSubdirs = new Set(docsDirFiles.map((relpath) => relpath.split("/")).filter((parts) => parts.length > 2).map((parts) => parts[1]));
+  const indexFiles = docsDirFiles.filter((relpath) => {
+    return ["readme.md", "index.md"].includes(path.posix.basename(relpath).toLowerCase());
+  });
+  let crossLinks = 0;
+  for (const [relpath, text] of Object.entries(ctx.doc_texts)) {
+    if (relpath.startsWith("docs/")) {
+      const matches = text.match(/\[[^\]]+\]\((?!https?:\/\/)[^)]+\)/gu);
+      crossLinks += matches ? matches.length : 0;
+    }
+  }
+  const evidence = Array.from(/* @__PURE__ */ new Set([...indexFiles, ...docsDirFiles.slice(0, 3)])).sort();
+  const hasDocsTree = docsDirFiles.length > 0;
+  const hasDocsIndex = indexFiles.length > 0;
+  const hasCrossLinks = crossLinks >= 3;
+  const hasDepth = docsSubdirs.size > 0;
+  if (hasDocsTree && hasDocsIndex && hasDepth && hasCrossLinks) {
+    return metric(3, "high", evidence, "Documentation appears organized, indexed, and linked across topics.", "Preserve the index and keep new docs inside the same structure.");
+  }
+  if (hasDocsTree && hasDocsIndex && docsDirFiles.length >= 3) {
+    return metric(2, "high", evidence, "The repo has an indexed docs tree, but it is still fairly shallow or only lightly cross-linked.", "Improve cross-links and add clearer sections for setup, architecture, and contributor flows.");
+  }
+  if (hasDocsTree && docsDirFiles.length >= 3) {
+    return metric(1, "medium", evidence.length > 0 ? evidence : docsDirFiles.slice(0, 3), "The repo has a shallow docs tree, but it lacks a clear index or stronger cross-links.", "Add `docs/README.md` or `docs/index.md` and improve cross-links between the main setup, architecture, and contributor pages.");
+  }
+  if (hasDocsTree) {
+    return metric(1, "medium", evidence.length > 0 ? evidence : docsDirFiles.slice(0, 3), "A docs directory exists, but it is still sparse or hard to navigate.", "Add `docs/README.md` or `docs/index.md` and improve cross-links as the docs tree grows.");
+  }
+  if (docCount >= 2) {
+    return metric(1, "medium", evidence.length > 0 ? evidence : ctx.doc_paths.slice(0, 3).sort(), "Some documentation exists, but the structure is shallow or scattered.", "Group repo docs under `docs/` or add an index that links the important pages.");
+  }
+  return metric(0, "high", evidence, "Very little structured documentation was found.", "Add a `docs/` directory with an index page and a small set of core topics.");
+}
+function isDecisionRecordPath(relpath) {
+  const lower = relpath.toLowerCase();
+  return /(^|\/)(adr|adrs|decisions?)(\/|[-_])/u.test(lower) && /\.(md|mdx)$/u.test(lower);
+}
+function isCanonicalDecisionRecordPath(relpath) {
+  const lower = relpath.toLowerCase();
+  return lower.startsWith("docs/adr/") || lower.startsWith("docs/adrs/") || lower.startsWith("docs/decisions/");
+}
+async function scoreDecisionRecords(ctx) {
+  const adrFiles = Array.from(ctx.relpaths).filter((relpath) => {
+    return isDecisionRecordPath(relpath);
+  }).sort();
+  const canonicalAdrFiles = adrFiles.filter((relpath) => {
+    return isCanonicalDecisionRecordPath(relpath);
+  });
+  let structured = 0;
+  let supersession = 0;
+  for (const relpath of adrFiles.slice(0, 10)) {
+    const text = await readText(path.join(ctx.root, relpath));
+    const lower = text.toLowerCase();
+    if (lower.includes("context") && lower.includes("decision")) {
+      structured += 1;
+    }
+    if (lower.includes("superseded by") || lower.includes("status")) {
+      supersession += 1;
+    }
+  }
+  if (canonicalAdrFiles.length >= 2 && structured >= 2 && supersession >= 1) {
+    return metric(3, "high", canonicalAdrFiles, "The repo appears to keep structured, evolving decision records in version control.", "Keep ADR status and supersession links current as decisions change.");
+  }
+  if (canonicalAdrFiles.length >= 2) {
+    return metric(2, "high", canonicalAdrFiles, "There is a dedicated decision-record trail, but it looks lightly structured.", "Standardize ADR headings such as Context, Decision, Consequences, and Status.");
+  }
+  if (canonicalAdrFiles.length > 0) {
+    return metric(1, "medium", canonicalAdrFiles, "A decision-record artifact exists, but the practice looks narrow or inconsistent.", "Keep architecture decision records together under `docs/decisions/` or `docs/adr/` and use that folder consistently.");
+  }
+  if (adrFiles.length > 0) {
+    return metric(1, "medium", adrFiles, "Decision-record artifacts exist, but they are scattered outside the main ADR trail.", "Move architecture decisions into `docs/decisions/` or `docs/adr/` and keep that folder authoritative.");
+  }
+  return metric(0, "high", adrFiles, "No decision-record artifacts were detected.", "Start recording major architecture and workflow decisions in ADRs.");
+}
+const METRIC_SCORERS = {
+  bootstrap_self_sufficiency: scoreBootstrap,
+  task_entrypoints: scoreTaskEntrypoints,
+  validation_harness: scoreValidationHarness,
+  lint_format_gates: scoreLintFormat,
+  guardrails_and_hooks: scoreGuardrailsAndHooks,
+  agent_repo_map: scoreAgentRepoMap,
+  structured_docs: scoreStructuredDocs,
+  decision_records: scoreDecisionRecords
+};
+function summarize(report) {
+  const priorities = Object.entries(report.metrics).sort((left, right) => left[1].score - right[1].score || left[0].localeCompare(right[0]));
+  report.quick_wins = priorities.slice(0, 3).map(([name, data]) => {
+    return `${name}: ${data.next_step}`;
+  });
+}
+function normalizeMetricNames(rawMetrics) {
+  if (rawMetrics.length === 0) {
+    return [...METRIC_NAMES];
+  }
+  const names = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const item of rawMetrics) {
+    for (const token of item.split(",")) {
+      const name = token.trim();
+      if (!name) continue;
+      if (!METRIC_NAMES.includes(name)) {
+        throw new Error(`Unknown metric '${name}'. Valid metrics: ${METRIC_NAMES.join(", ")}`);
+      }
+      if (!seen.has(name)) {
+        seen.add(name);
+        names.push(name);
+      }
+    }
+  }
+  return names;
+}
+async function buildReport(root, excludes, selectedMetrics, scope) {
+  const rootContext = await collectContext(root, excludes);
+  const normalizedScope = scope ? normalizeScope(root, scope) : void 0;
+  const [evaluatedScope, discoveredScopes, scopeSelection] = chooseScope(rootContext, normalizedScope);
+  const targetRoot = evaluatedScope === ROOT_SCOPE ? root : path.resolve(root, evaluatedScope);
+  const context = targetRoot === root ? rootContext : await collectContext(targetRoot, excludes);
+  const metrics = {};
+  for (const metricName of selectedMetrics) {
+    metrics[metricName] = await METRIC_SCORERS[metricName](context);
+  }
+  const score = Object.values(metrics).reduce((total, data) => total + data.score, 0);
+  const maxScore = selectedMetrics.length * 3;
+  const scorePercentage = maxScore === 0 ? 0 : Math.round(score / maxScore * 100);
+  const report = {
+    repo: root,
+    evaluated_scope: evaluatedScope,
+    evaluated_root: targetRoot,
+    discovered_scopes: discoveredScopes,
+    scope_selection: scopeSelection,
+    selected_metrics: selectedMetrics,
+    available_metrics: [...METRIC_NAMES],
+    score,
+    max_score: maxScore,
+    score_percentage: scorePercentage,
+    metrics,
+    notes: [
+      "This score is limited to repo-visible evidence.",
+      "Operational metrics such as CI reliability or debt tracking are intentionally excluded from the main score.",
+      "Nested scopes may be auto-selected when the repository clearly routes work into one self-contained subsystem."
+    ],
+    quick_wins: []
+  };
+  summarize(report);
+  return report;
+}
+function toMarkdown(report) {
+  const lines = [
+    "# Agentic Legibility Scorecard",
+    "",
+    `- Repository: \`${report.repo}\``,
+    `- Evaluated scope: \`${report.evaluated_scope}\``,
+    `- Score: **${report.score}/${report.max_score}** (${report.score_percentage}%)`,
+    "",
+    "## Scope Discovery",
+    ""
+  ];
+  if (report.discovered_scopes.length > 0) {
+    for (const scope of report.discovered_scopes) {
+      const signals = scope.signals.map((item) => `\`${item}\``).join(", ");
+      lines.push(`- \`${scope.path}\` (${scope.score}): ${signals}`);
+    }
+  } else {
+    lines.push("- No nested scoring scopes discovered.");
+  }
+  lines.push("");
+  lines.push("## Metrics");
+  lines.push("");
+  lines.push("| Metric | Score | Confidence | Evidence | Gap | Next step |");
+  lines.push("| --- | --- | --- | --- | --- | --- |");
+  for (const [name, data] of Object.entries(report.metrics)) {
+    const evidence = data.evidence.length > 0 ? data.evidence.map((item) => `\`${item}\``).join("<br>") : "-";
+    const gap = data.gaps.replaceAll("|", "\\|");
+    const nextStep = data.next_step.replaceAll("|", "\\|");
+    lines.push(`| \`${name}\` | ${data.score}/3 | ${data.confidence} | ${evidence} | ${gap} | ${nextStep} |`);
+  }
+  lines.push("");
+  lines.push("## Quick Wins");
+  lines.push("");
+  for (const item of report.quick_wins) {
+    lines.push(`- ${item}`);
+  }
+  lines.push("");
+  lines.push("## Notes");
+  lines.push("");
+  for (const note of report.notes) {
+    lines.push(`- ${note}`);
+  }
+  return lines.join("\n");
+}
+function parseCliArgs$1(argv) {
+  const args = {
+    repo: ".",
+    format: "json",
+    metrics: [],
+    listMetrics: false,
+    listScopes: false,
+    scope: void 0,
+    excludes: []
+  };
+  const positionals = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--format") {
+      const value = argv[index + 1];
+      if (value !== "json" && value !== "markdown") {
+        throw new Error("--format requires either json or markdown");
+      }
+      args.format = value;
+      index += 1;
+    } else if (arg === "--metric") {
+      const value = argv[index + 1];
+      if (!value) throw new Error("--metric requires a value");
+      args.metrics.push(value);
+      index += 1;
+    } else if (arg === "--list-metrics") {
+      args.listMetrics = true;
+    } else if (arg === "--list-scopes") {
+      args.listScopes = true;
+    } else if (arg === "--scope") {
+      const value = argv[index + 1];
+      if (!value) throw new Error("--scope requires a value");
+      args.scope = value;
+      index += 1;
+    } else if (arg === "--exclude") {
+      const value = argv[index + 1];
+      if (!value) throw new Error("--exclude requires a value");
+      args.excludes.push(value);
+      index += 1;
+    } else if (arg.startsWith("--")) {
+      throw new Error(`Unknown option: ${arg}`);
+    } else {
+      positionals.push(arg);
+    }
+  }
+  if (positionals.length > 1) {
+    throw new Error("Only one repository path may be provided.");
+  }
+  if (positionals.length === 1) {
+    args.repo = positionals[0];
+  }
+  return args;
+}
+async function runCli$1(argv = process.argv.slice(2)) {
+  const args = parseCliArgs$1(argv);
+  if (args.listMetrics) {
+    process.stdout.write(`${METRIC_NAMES.join("\n")}
+`);
+    return;
+  }
+  const root = path.resolve(args.repo);
+  if (!await isDirectory(root)) {
+    throw new Error(`Repository path does not exist or is not a directory: ${root}`);
+  }
+  if (args.scope) {
+    const normalizedScope = normalizeScope(root, args.scope);
+    const scopePath = path.resolve(root, normalizedScope);
+    if (!await isDirectory(scopePath)) {
+      throw new Error(`Scope path does not exist or is not a directory: ${scopePath}`);
+    }
+  }
+  if (args.listScopes) {
+    const context = await collectContext(root, args.excludes);
+    process.stdout.write(`${JSON.stringify(discoverScopes(context), null, 2)}
+`);
+    return;
+  }
+  const selectedMetrics = normalizeMetricNames(args.metrics);
+  const report = await buildReport(root, args.excludes, selectedMetrics, args.scope);
+  if (args.format === "json") {
+    process.stdout.write(`${JSON.stringify(report, null, 2)}
+`);
+  } else {
+    process.stdout.write(`${toMarkdown(report)}
+`);
+  }
+}
+const SEVERITY_ERROR = "error";
+const SEVERITY_WARNING = "warning";
+function finding(severity, pathValue, message, remediation, line = null) {
+  return {
+    severity,
+    path: pathValue,
+    line,
+    message,
+    remediation
+  };
+}
+function checkResult(name, findings, summary) {
+  const hasError = findings.some((f) => f.severity === SEVERITY_ERROR);
+  return {
+    check: name,
+    status: hasError ? "drift" : "ok",
+    findings,
+    summary
+  };
+}
+function auditReport(repo, checks) {
+  const results = Object.values(checks);
+  const hasDrift = results.some((r) => r.status === "drift");
+  return {
+    repo,
+    status: hasDrift ? "drift" : "ok",
+    checks
+  };
+}
+function formatJson(report) {
+  return JSON.stringify(report, null, 2);
+}
+function renderFindingsList(findings) {
+  if (findings.length === 0) {
+    return ["_No findings._"];
+  }
+  const lines = [];
+  for (const item of findings) {
+    const location = item.line ? `${item.path}:${item.line}` : item.path;
+    lines.push(`- **${item.severity.toUpperCase()}** \`${location}\` — ${item.message}`);
+    if (item.remediation) {
+      lines.push(`  - Fix: ${item.remediation}`);
+    }
+  }
+  return lines;
+}
+function formatAuditMarkdown(report) {
+  const lines = [
+    "# Agentic Legibility Audit",
+    "",
+    `- Repository: \`${report.repo}\``,
+    `- Status: **${report.status.toUpperCase()}**`,
+    ""
+  ];
+  for (const [name, result] of Object.entries(report.checks)) {
+    lines.push(`## ${name}`);
+    lines.push("");
+    lines.push(`Status: **${result.status.toUpperCase()}** — ${result.summary}`);
+    lines.push("");
+    lines.push(...renderFindingsList(result.findings));
+    lines.push("");
+  }
+  return lines.join("\n");
+}
+function formatSingleCheckJson(result) {
+  return JSON.stringify(result, null, 2);
+}
+function formatSingleCheckMarkdown(result) {
+  const lines = [
+    `# Check: ${result.check}`,
+    "",
+    `Status: **${result.status.toUpperCase()}** — ${result.summary}`,
+    "",
+    ...renderFindingsList(result.findings)
+  ];
+  return lines.join("\n");
+}
+const FENCE_OPEN = /^(\s*)(```+|~~~+)\s*([^\s`]*)\s*$/u;
+function isClosingFence(line, marker) {
+  const trimmed = line.trimEnd();
+  return trimmed === marker || trimmed.startsWith(marker);
+}
+function toAnchor(headingText) {
+  const withoutLinks = headingText.replace(/\[([^\]]+)\]\([^)]*\)/gu, "$1");
+  const stripped = withoutLinks.replace(/[*_`]+/gu, "");
+  const lowered = stripped.toLowerCase();
+  const cleaned = lowered.replace(/[^\p{L}\p{N}\s\-_]/gu, "");
+  const hyphenated = cleaned.replace(/\s+/gu, "-");
+  return hyphenated.replace(/^-+|-+$/gu, "");
+}
+function stripInlineCode(line) {
+  return line.replace(/`[^`\n]*`/gu, (match) => " ".repeat(match.length));
+}
+function parseMarkdown(text) {
+  const lines = text.split(/\r?\n/u);
+  const codeBlockRanges = [];
+  const links = [];
+  const headings = [];
+  const referenceDefinitions = /* @__PURE__ */ new Map();
+  const seenAnchors = /* @__PURE__ */ new Map();
+  let inFence = false;
+  let fenceStart = 0;
+  let fenceMarker = "";
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const lineNumber = index + 1;
+    if (inFence) {
+      if (isClosingFence(line, fenceMarker)) {
+        codeBlockRanges.push([fenceStart, lineNumber]);
+        inFence = false;
+        fenceMarker = "";
+      }
+      continue;
+    }
+    const fenceMatch = line.match(FENCE_OPEN);
+    if (fenceMatch) {
+      inFence = true;
+      fenceStart = lineNumber;
+      fenceMarker = fenceMatch[2];
+      continue;
+    }
+    const headingMatch = line.match(/^(#{1,6})\s+(.*?)\s*#*\s*$/u);
+    if (headingMatch) {
+      const level = headingMatch[1].length;
+      const textContent = headingMatch[2];
+      let anchor = toAnchor(textContent);
+      if (anchor) {
+        const seen = seenAnchors.get(anchor) || 0;
+        if (seen > 0) {
+          const suffixed = `${anchor}-${seen}`;
+          seenAnchors.set(anchor, seen + 1);
+          anchor = suffixed;
+        } else {
+          seenAnchors.set(anchor, 1);
+        }
+      }
+      headings.push({ text: textContent, level, line: lineNumber, anchor });
+      continue;
+    }
+    const refDefMatch = line.match(/^\s{0,3}\[([^\]]+)\]:\s*(\S+)(?:\s+.*)?$/u);
+    if (refDefMatch) {
+      const label = refDefMatch[1].trim().toLowerCase();
+      referenceDefinitions.set(label, refDefMatch[2]);
+      continue;
+    }
+    const stripped = stripInlineCode(line);
+    extractLineLinks(stripped, lineNumber, links);
+  }
+  if (inFence) {
+    codeBlockRanges.push([fenceStart, lines.length]);
+  }
+  return { links, headings, codeBlockRanges, referenceDefinitions };
+}
+function extractLineLinks(line, lineNumber, outLinks) {
+  const inlineRegex = /\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/gu;
+  let match;
+  while ((match = inlineRegex.exec(line)) !== null) {
+    outLinks.push({
+      href: match[2],
+      text: match[1],
+      line: lineNumber,
+      kind: "inline"
+    });
+  }
+  const fullReferenceRegex = /\[([^\]]+)\]\[([^\]]*)\]/gu;
+  while ((match = fullReferenceRegex.exec(line)) !== null) {
+    const text = match[1];
+    const ref = match[2] || match[1];
+    outLinks.push({
+      href: `ref:${ref.toLowerCase()}`,
+      text,
+      line: lineNumber,
+      kind: "reference"
+    });
+  }
+}
+function isExternalHref(href) {
+  return /^(?:[a-z][a-z0-9+.-]*:|\/\/)/iu.test(href);
+}
+function splitHref(href) {
+  const hashIndex = href.indexOf("#");
+  if (hashIndex === -1) {
+    return { target: href, anchor: null };
+  }
+  const target = href.slice(0, hashIndex);
+  const anchor = href.slice(hashIndex + 1);
+  return {
+    target: target.length > 0 ? target : null,
+    anchor: anchor.length > 0 ? anchor : null
+  };
+}
+function resolveReference(link, referenceDefinitions) {
+  if (link.kind !== "reference") {
+    return link.href;
+  }
+  const label = link.href.replace(/^ref:/u, "");
+  return referenceDefinitions.get(label) ?? null;
+}
+function extractCodeSnippets(text) {
+  const lines = text.split(/\r?\n/u);
+  const snippets = [];
+  let inFence = false;
+  let fenceMarker = "";
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const lineNumber = index + 1;
+    if (inFence) {
+      if (isClosingFence(line, fenceMarker)) {
+        inFence = false;
+        fenceMarker = "";
+        continue;
+      }
+      snippets.push({ snippet: line, line: lineNumber });
+      continue;
+    }
+    const fenceMatch = line.match(FENCE_OPEN);
+    if (fenceMatch) {
+      inFence = true;
+      fenceMarker = fenceMatch[2];
+      continue;
+    }
+    const inlineRegex = /`([^`\n]+)`/gu;
+    let match;
+    while ((match = inlineRegex.exec(line)) !== null) {
+      snippets.push({ snippet: match[1], line: lineNumber });
+    }
+  }
+  return snippets;
+}
+function extractInlineCodeSpans(text) {
+  const lines = text.split(/\r?\n/u);
+  const spans = [];
+  let inFence = false;
+  let fenceMarker = "";
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const lineNumber = index + 1;
+    if (inFence) {
+      if (isClosingFence(line, fenceMarker)) {
+        inFence = false;
+        fenceMarker = "";
+      }
+      continue;
+    }
+    const fenceMatch = line.match(FENCE_OPEN);
+    if (fenceMatch) {
+      inFence = true;
+      fenceMarker = fenceMatch[2];
+      continue;
+    }
+    const regex = /`([^`\n]+)`/gu;
+    let match;
+    while ((match = regex.exec(line)) !== null) {
+      spans.push({ content: match[1], line: lineNumber });
+    }
+  }
+  return spans;
+}
+function isPlaceholderToken(token) {
+  if (/^[A-Z]$/u.test(token)) return true;
+  if (/^[A-Z][A-Z0-9_-]*$/u.test(token) && token.length <= 8) return true;
+  return false;
+}
+const MAKE_BUILTINS = /* @__PURE__ */ new Set(["clean", "all", "install", "help"]);
+const GRADLE_BUILTINS = /* @__PURE__ */ new Set([
+  "assemble",
+  "build",
+  "buildEnvironment",
+  "check",
+  "clean",
+  "components",
+  "dependencies",
+  "dependencyInsight",
+  "dependentComponents",
+  "help",
+  "init",
+  "javaToolchains",
+  "model",
+  "outgoingVariants",
+  "projects",
+  "properties",
+  "resolvableConfigurations",
+  "tasks",
+  "test",
+  "wrapper",
+  "bootRun",
+  "bootJar",
+  "bootWar"
+]);
+const MAVEN_BUILTINS = /* @__PURE__ */ new Set([
+  "validate",
+  "compile",
+  "test",
+  "package",
+  "verify",
+  "install",
+  "deploy",
+  "clean",
+  "site"
+]);
+const COMPOSER_BUILTINS = /* @__PURE__ */ new Set([
+  "about",
+  "archive",
+  "audit",
+  "browse",
+  "check-platform-reqs",
+  "clear-cache",
+  "clearcache",
+  "config",
+  "create-project",
+  "depends",
+  "diagnose",
+  "dump-autoload",
+  "dumpautoload",
+  "exec",
+  "fund",
+  "global",
+  "help",
+  "home",
+  "i",
+  "info",
+  "init",
+  "install",
+  "licenses",
+  "list",
+  "outdated",
+  "prohibits",
+  "reinstall",
+  "remove",
+  "require",
+  "run",
+  "run-script",
+  "search",
+  "self-update",
+  "selfupdate",
+  "show",
+  "status",
+  "suggests",
+  "u",
+  "update",
+  "upgrade",
+  "validate",
+  "why",
+  "why-not"
+]);
+const CARGO_BUILTINS = /* @__PURE__ */ new Set([
+  "build",
+  "check",
+  "clean",
+  "doc",
+  "fetch",
+  "fix",
+  "generate-lockfile",
+  "init",
+  "install",
+  "locate-project",
+  "login",
+  "logout",
+  "metadata",
+  "new",
+  "owner",
+  "package",
+  "pkgid",
+  "publish",
+  "read-manifest",
+  "remove",
+  "run",
+  "rustc",
+  "rustdoc",
+  "search",
+  "test",
+  "tree",
+  "uninstall",
+  "update",
+  "vendor",
+  "verify-project",
+  "version",
+  "yank",
+  "clippy",
+  "fmt",
+  "miri",
+  "audit",
+  "expand",
+  "bench"
+]);
+const NX_BUILTINS = /* @__PURE__ */ new Set([
+  "add",
+  "affected",
+  "connect",
+  "daemon",
+  "exec",
+  "format",
+  "format:check",
+  "format:write",
+  "g",
+  "generate",
+  "graph",
+  "import",
+  "init",
+  "list",
+  "login",
+  "logout",
+  "migrate",
+  "release",
+  "repair",
+  "report",
+  "reset",
+  "run",
+  "run-many",
+  "show",
+  "sync",
+  "watch"
+]);
+const TURBO_BUILTINS = /* @__PURE__ */ new Set([
+  "bin",
+  "daemon",
+  "gen",
+  "generate",
+  "info",
+  "link",
+  "login",
+  "logout",
+  "ls",
+  "prune",
+  "query",
+  "run",
+  "scan",
+  "telemetry",
+  "unlink",
+  "watch"
+]);
+const MIX_BUILTINS = /* @__PURE__ */ new Set([
+  "archive",
+  "clean",
+  "compile",
+  "credo",
+  "deps",
+  "deps.clean",
+  "deps.compile",
+  "deps.get",
+  "deps.tree",
+  "deps.unlock",
+  "deps.update",
+  "dialyzer",
+  "do",
+  "docs",
+  "ecto.create",
+  "ecto.drop",
+  "ecto.migrate",
+  "ecto.reset",
+  "ecto.rollback",
+  "ecto.setup",
+  "escript.build",
+  "format",
+  "help",
+  "hex.info",
+  "local.hex",
+  "local.rebar",
+  "new",
+  "phx.gen.html",
+  "phx.new",
+  "phx.routes",
+  "phx.server",
+  "release",
+  "run",
+  "test",
+  "xref"
+]);
+function normalizeNxToken(token) {
+  if (!token.includes(":")) return token;
+  const segments = token.split(":");
+  return segments.length >= 2 && segments[1] ? segments[1] : null;
+}
+function normalizeGradleToken(token) {
+  const segments = token.split(":").filter(Boolean);
+  return segments.length > 0 ? segments[segments.length - 1] : null;
+}
+function normalizeMavenToken(token) {
+  return token.includes(":") ? null : token;
+}
+const TASK_REFERENCE_PATTERNS = [
+  { runner: "javascript", regex: /(?:^|[\s&;|(])(?:npm|pnpm|yarn|bun)\s+run(?:-script)?\s+([A-Za-z0-9_.:-]+)/gu },
+  { runner: "make", regex: /(?:^|[\s&;|(])make\s+([A-Za-z0-9_.:-]+)/gu, builtins: MAKE_BUILTINS },
+  { runner: "just", regex: /(?:^|[\s&;|(])just\s+([A-Za-z0-9_.:-]+)/gu },
+  { runner: "task", regex: /(?:^|[\s&;|(])task\s+([A-Za-z0-9_.:-]+)/gu },
+  { runner: "cargo", regex: /(?:^|[\s&;|(])cargo\s+([A-Za-z0-9_.:-]+)/gu, builtins: CARGO_BUILTINS },
+  { runner: "gradle", regex: /(?:^|[\s&;|(])(?:\.\/)?gradlew?\s+([A-Za-z0-9_.:-]+)/gu, builtins: GRADLE_BUILTINS, normalize: normalizeGradleToken },
+  { runner: "maven", regex: /(?:^|[\s&;|(])(?:mvn|mvnw|\.\/mvnw)\s+([A-Za-z0-9_.:-]+)/gu, builtins: MAVEN_BUILTINS, normalize: normalizeMavenToken },
+  { runner: "composer", regex: /(?:^|[\s&;|(])composer\s+run(?:-script)?\s+([A-Za-z0-9_.:-]+)/gu },
+  { runner: "composer", regex: /(?:^|[\s&;|(])composer\s+([A-Za-z0-9_.:-]+)/gu, builtins: COMPOSER_BUILTINS },
+  { runner: "rake", regex: /(?:^|[\s&;|(])(?:bundle\s+exec\s+)?rake\s+([A-Za-z0-9_.:-]+)/gu },
+  { runner: "nx", regex: /(?:^|[\s&;|(])(?:npx\s+|pnpm\s+|yarn\s+)?nx\s+(?:run\s+)?([A-Za-z0-9_.:-]+)/gu, builtins: NX_BUILTINS, normalize: normalizeNxToken },
+  { runner: "turbo", regex: /(?:^|[\s&;|(])(?:npx\s+|pnpm\s+|yarn\s+)?turbo\s+(?:run\s+)?([A-Za-z0-9_.:-]+)/gu, builtins: TURBO_BUILTINS },
+  { runner: "mise", regex: /(?:^|[\s&;|(])mise\s+run\s+([A-Za-z0-9_.:-]+)/gu },
+  { runner: "mix", regex: /(?:^|[\s&;|(])mix\s+([A-Za-z0-9_.:-]+)/gu, builtins: MIX_BUILTINS }
+];
+function extractTaskReferences(text) {
+  const snippets = extractCodeSnippets(text);
+  const references = [];
+  for (const { snippet, line } of snippets) {
+    for (const { runner, regex, builtins, normalize } of TASK_REFERENCE_PATTERNS) {
+      regex.lastIndex = 0;
+      let match;
+      while ((match = regex.exec(snippet)) !== null) {
+        let token = match[1];
+        if (token.startsWith("-")) continue;
+        if (builtins?.has(token)) continue;
+        if (normalize) {
+          const normalized = normalize(token);
+          if (normalized === null) continue;
+          token = normalized;
+        }
+        if (builtins?.has(token)) continue;
+        if (isPlaceholderToken(token)) continue;
+        references.push({
+          runner,
+          token,
+          line,
+          raw: match[0].trimStart()
+        });
+      }
+    }
+  }
+  return references;
+}
+const REQUIRED_SECTIONS = [
+  "Purpose / Big Picture",
+  "Progress",
+  "Surprises & Discoveries",
+  "Decision Log",
+  "Outcomes & Retrospective",
+  "Context and Orientation",
+  "Plan of Work",
+  "Concrete Steps",
+  "Validation and Acceptance",
+  "Idempotence and Recovery",
+  "Artifacts and Notes",
+  "Interfaces and Dependencies"
+];
+const CHECKBOX_REGEX = /^\s*[*-]\s+\[([ xX])\]/u;
+function normalizeHeading(text) {
+  return text.trim().replace(/\s+/gu, " ").toLowerCase();
+}
+function isFencedLine(lineNumber, codeBlockRanges) {
+  return codeBlockRanges.some(([start, end]) => lineNumber >= start && lineNumber <= end);
+}
+function extractSectionBodies(lines, headings) {
+  const bodies = {};
+  const sectionHeadings = headings.filter((h) => h.level === 2);
+  for (let i = 0; i < sectionHeadings.length; i += 1) {
+    const start = sectionHeadings[i].line;
+    const end = i + 1 < sectionHeadings.length ? sectionHeadings[i + 1].line - 1 : lines.length;
+    const body = lines.slice(start, end).join("\n").trim();
+    const canonical = REQUIRED_SECTIONS.find((name) => {
+      return normalizeHeading(name) === normalizeHeading(sectionHeadings[i].text);
+    });
+    bodies[canonical ?? sectionHeadings[i].text.trim()] = body;
+  }
+  return bodies;
+}
+function parseExecPlan(text) {
+  const { headings, codeBlockRanges } = parseMarkdown(text);
+  const presentHeadings = new Set(headings.map((h) => normalizeHeading(h.text)));
+  const presentSections = /* @__PURE__ */ new Set();
+  const missingSections = [];
+  for (const name of REQUIRED_SECTIONS) {
+    if (presentHeadings.has(normalizeHeading(name))) {
+      presentSections.add(name);
+    } else {
+      missingSections.push(name);
+    }
+  }
+  const lines = text.split(/\r?\n/u);
+  const progress = { total: 0, done: 0, remaining: 0 };
+  for (let index = 0; index < lines.length; index += 1) {
+    if (isFencedLine(index + 1, codeBlockRanges)) continue;
+    const match = lines[index].match(CHECKBOX_REGEX);
+    if (!match) continue;
+    progress.total += 1;
+    if (match[1] === "x" || match[1] === "X") {
+      progress.done += 1;
+    } else {
+      progress.remaining += 1;
+    }
+  }
+  const sectionBodies = extractSectionBodies(lines, headings);
+  return {
+    headings: headings.map((h) => h.text),
+    presentSections,
+    missingSections,
+    progress,
+    sectionBodies
+  };
+}
+const execFileAsync = promisify(execFile);
+async function lastGitCommitTimestamp(root, relpath) {
+  try {
+    const { stdout } = await execFileAsync(
+      "git",
+      ["log", "-1", "--format=%ct", "--", relpath],
+      { cwd: root }
+    );
+    const trimmed = stdout.trim();
+    if (!trimmed) return null;
+    const parsed = Number.parseInt(trimmed, 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  } catch (_error) {
+    return null;
+  }
+}
+async function lastActivityTimestamp(root, relpath) {
+  const gitTimestamp = await lastGitCommitTimestamp(root, relpath);
+  if (gitTimestamp !== null) return gitTimestamp;
+  try {
+    const stat = await promises.stat(path.join(root, relpath));
+    return Math.floor(stat.mtimeMs / 1e3);
+  } catch (_error) {
+    return null;
+  }
+}
+const REQUIRED_ARTIFACTS = [
+  { path: "AGENTS.md", kind: "file", severity: SEVERITY_ERROR, remediation: "Create AGENTS.md at the repository root with a concise agent map." },
+  { path: ".agents", kind: "dir", severity: SEVERITY_ERROR, remediation: "Create the `.agents/` directory for agent-facing infrastructure." },
+  { path: ".agents/PLANS.md", kind: "file", severity: SEVERITY_ERROR, remediation: "Copy PLANS.md from the agentic-legibility skill to .agents/PLANS.md verbatim." },
+  { path: "docs", kind: "dir", severity: SEVERITY_ERROR, remediation: "Create the `docs/` directory to hold progressive-disclosure documentation." },
+  { path: "docs/exec-plans", kind: "dir", severity: SEVERITY_ERROR, remediation: "Create `docs/exec-plans/` to host active and completed ExecPlans." },
+  { path: "docs/exec-plans/active", kind: "dir", severity: SEVERITY_WARNING, remediation: "Create `docs/exec-plans/active/` to hold in-progress plans." },
+  { path: "docs/exec-plans/completed", kind: "dir", severity: SEVERITY_WARNING, remediation: "Create `docs/exec-plans/completed/` to hold finished plans." },
+  { path: "CLAUDE.md", kind: "file", severity: SEVERITY_WARNING, remediation: "Create CLAUDE.md containing `@AGENTS.md` to route Claude Code to the agent map." }
+];
+async function pathExists$1(absolutePath, kind) {
+  try {
+    const stat = await promises.stat(absolutePath);
+    return kind === "dir" ? stat.isDirectory() : stat.isFile();
+  } catch (_error) {
+    return false;
+  }
+}
+async function checkArtifacts(root) {
+  const rawFindings = [];
+  const presentPaths = /* @__PURE__ */ new Set();
+  for (const artifact of REQUIRED_ARTIFACTS) {
+    const absolutePath = path.join(root, artifact.path);
+    const exists = await pathExists$1(absolutePath, artifact.kind);
+    if (exists) {
+      presentPaths.add(artifact.path);
+      continue;
+    }
+    rawFindings.push(finding(
+      artifact.severity,
+      artifact.path,
+      `Required legibility artifact missing (${artifact.kind}).`,
+      artifact.remediation
+    ));
+  }
+  const agentsMdPresent = presentPaths.has("AGENTS.md");
+  const findings = rawFindings.filter((f) => {
+    if (f.path === "CLAUDE.md" && agentsMdPresent) return false;
+    return true;
+  });
+  const errorCount = findings.filter((f) => f.severity === SEVERITY_ERROR).length;
+  const warningCount = findings.filter((f) => f.severity === SEVERITY_WARNING).length;
+  const summary = findings.length === 0 ? "All required legibility artifacts are present." : `${errorCount} missing required artifact${errorCount === 1 ? "" : "s"}${warningCount > 0 ? `, ${warningCount} recommended artifact${warningCount === 1 ? "" : "s"} missing` : ""}.`;
+  return checkResult("artifacts", findings, summary);
+}
+const MARKDOWN_EXTENSIONS = /* @__PURE__ */ new Set([".md", ".mdx"]);
+const LINK_ENTRY_FILES = ["README.md", "AGENTS.md", "CLAUDE.md"];
+function isMarkdownFile(relpath) {
+  const lower = relpath.toLowerCase();
+  for (const ext of MARKDOWN_EXTENSIONS) {
+    if (lower.endsWith(ext)) return true;
+  }
+  return false;
+}
+function normalizeRelativeHref(href) {
+  if (href.startsWith("./")) return href.slice(2);
+  return href;
+}
+function resolveLinkTarget(fromRelpath, href) {
+  const { target, anchor } = splitHref(href);
+  if (target === null) {
+    return { target: fromRelpath, anchor, originalHref: href };
+  }
+  const normalized = normalizeRelativeHref(target);
+  const fromDir = fromRelpath.includes("/") ? fromRelpath.slice(0, fromRelpath.lastIndexOf("/")) : "";
+  const joined = fromDir ? path.posix.join(fromDir, normalized) : normalized;
+  const resolved = path.posix.normalize(joined);
+  return { target: resolved, anchor, originalHref: href };
+}
+async function resolveExistingLinkTarget(root, relpath) {
+  try {
+    const stat = await promises.stat(path.join(root, relpath));
+    if (stat.isFile()) return relpath;
+    if (!stat.isDirectory()) return null;
+    for (const entryFile of ["README.md", "index.md"]) {
+      const entryRelpath = path.posix.join(relpath, entryFile);
+      const entryStat = await promises.stat(path.join(root, entryRelpath)).catch(() => null);
+      if (entryStat?.isFile()) return entryRelpath;
+    }
+    return relpath;
+  } catch (_error) {
+    return null;
+  }
+}
+async function fileExistsInRepo(root, relpath) {
+  return await resolveExistingLinkTarget(root, relpath) !== null;
+}
+function buildEntrySet(markdownPaths) {
+  const entrySet = /* @__PURE__ */ new Set();
+  for (const relpath of markdownPaths) {
+    if (LINK_ENTRY_FILES.includes(relpath)) {
+      entrySet.add(relpath);
+      continue;
+    }
+    if (relpath === "docs/README.md" || relpath === "docs/index.md") {
+      entrySet.add(relpath);
+      continue;
+    }
+    const parts = relpath.split("/");
+    if (parts.length === 3 && parts[0] === "docs" && (parts[2] === "README.md" || parts[2] === "index.md")) {
+      entrySet.add(relpath);
+    }
+  }
+  return entrySet;
+}
+async function checkLinks(root, options = {}) {
+  const excludes = options.excludes || [];
+  const files = options.files ?? await walkRepo(root, excludes);
+  const markdownPaths = files.filter(isMarkdownFile).sort();
+  const findings = [];
+  const adjacency = /* @__PURE__ */ new Map();
+  const parsedByFile = /* @__PURE__ */ new Map();
+  for (const relpath of markdownPaths) {
+    const text = await readText(path.join(root, relpath));
+    parsedByFile.set(relpath, parseMarkdown(text));
+    adjacency.set(relpath, /* @__PURE__ */ new Set());
+  }
+  for (const relpath of markdownPaths) {
+    const parsed = parsedByFile.get(relpath);
+    for (const link of parsed.links) {
+      const resolvedHref = resolveReference(link, parsed.referenceDefinitions);
+      if (resolvedHref === null) {
+        findings.push(finding(
+          SEVERITY_WARNING,
+          relpath,
+          `Unresolved reference link \`${link.text}\` (no definition in file).`,
+          "Add a matching `[label]: url` definition or change the link.",
+          link.line
+        ));
+        continue;
+      }
+      if (!resolvedHref || isExternalHref(resolvedHref)) continue;
+      const resolved = resolveLinkTarget(relpath, resolvedHref);
+      if (!resolved.target) continue;
+      if (resolved.target.startsWith("..")) continue;
+      const effectiveTarget = await resolveExistingLinkTarget(root, resolved.target);
+      if (effectiveTarget === null) {
+        findings.push(finding(
+          SEVERITY_ERROR,
+          relpath,
+          `Broken link to \`${resolvedHref}\` (target not found).`,
+          `Update the link or create the target file \`${resolved.target}\`.`,
+          link.line
+        ));
+        continue;
+      }
+      if (resolved.anchor && isMarkdownFile(effectiveTarget)) {
+        const targetParsed = parsedByFile.get(effectiveTarget) || parseMarkdown(await readText(path.join(root, effectiveTarget)));
+        const anchors = new Set(targetParsed.headings.map((h) => h.anchor).filter(Boolean));
+        if (!anchors.has(resolved.anchor)) {
+          findings.push(finding(
+            SEVERITY_WARNING,
+            relpath,
+            `Broken anchor \`#${resolved.anchor}\` in \`${effectiveTarget}\` (no matching heading).`,
+            `Update the anchor to match a heading in \`${effectiveTarget}\` or add the heading.`,
+            link.line
+          ));
+        }
+      }
+      if (isMarkdownFile(effectiveTarget) && adjacency.has(effectiveTarget)) {
+        adjacency.get(relpath).add(effectiveTarget);
+      }
+    }
+  }
+  const entrySet = buildEntrySet(markdownPaths);
+  const reachable = new Set(entrySet);
+  const queue = Array.from(entrySet);
+  while (queue.length > 0) {
+    const current = queue.shift();
+    const neighbors = adjacency.get(current);
+    if (!neighbors) continue;
+    for (const neighbor of neighbors) {
+      if (!reachable.has(neighbor)) {
+        reachable.add(neighbor);
+        queue.push(neighbor);
+      }
+    }
+  }
+  for (const relpath of markdownPaths) {
+    if (!relpath.startsWith("docs/")) continue;
+    if (reachable.has(relpath)) continue;
+    findings.push(finding(
+      SEVERITY_WARNING,
+      relpath,
+      "Orphaned documentation file (not reachable from any index).",
+      "Link this file from docs/README.md or a parent-directory README, or delete it."
+    ));
+  }
+  const brokenLinkCount = findings.filter((f) => f.message.startsWith("Broken link")).length;
+  const brokenAnchorCount = findings.filter((f) => f.message.startsWith("Broken anchor")).length;
+  const orphanCount = findings.filter((f) => f.message.startsWith("Orphaned")).length;
+  const unresolvedRefCount = findings.filter((f) => f.message.startsWith("Unresolved reference")).length;
+  const summary = findings.length === 0 ? "No broken links, anchors, or orphaned docs." : `${brokenLinkCount} broken link${brokenLinkCount === 1 ? "" : "s"}, ${brokenAnchorCount} broken anchor${brokenAnchorCount === 1 ? "" : "s"}, ${orphanCount} orphan doc${orphanCount === 1 ? "" : "s"}${unresolvedRefCount > 0 ? `, ${unresolvedRefCount} unresolved reference${unresolvedRefCount === 1 ? "" : "s"}` : ""}.`;
+  return checkResult("links", findings, summary);
+}
+const RUNNER_LABEL = {
+  javascript: "npm/pnpm/yarn/bun",
+  make: "make",
+  just: "just",
+  task: "task",
+  cargo: "cargo",
+  python: "Python",
+  gradle: "Gradle",
+  maven: "Maven",
+  dotnet: ".NET / MSBuild",
+  cmake: "CMake",
+  composer: "Composer",
+  rake: "rake",
+  xcode: "Xcode",
+  nx: "Nx",
+  turbo: "Turbo",
+  mise: "mise",
+  mix: "Mix"
+};
+async function checkCommands(root, options = {}) {
+  const excludes = options.excludes || [];
+  const files = options.files ?? await walkRepo(root, excludes);
+  const surfaceByRunner = options.surfaceByRunner ?? await collectTaskSurfaceByRunner(root, files);
+  const findings = [];
+  const markdownPaths = files.filter(isMarkdownFile).sort();
+  for (const relpath of markdownPaths) {
+    const text = await readText(path.join(root, relpath));
+    const references = extractTaskReferences(text);
+    for (const ref of references) {
+      const knownNames = surfaceByRunner[ref.runner];
+      if (!knownNames) continue;
+      if (knownNames.has(ref.token)) continue;
+      findings.push(finding(
+        SEVERITY_WARNING,
+        relpath,
+        `Doc references ${RUNNER_LABEL[ref.runner] ?? ref.runner} task \`${ref.token}\` but it is not defined in the task surface.`,
+        `Define \`${ref.token}\` in the ${RUNNER_LABEL[ref.runner] ?? ref.runner} task file, or update the doc to name an existing task.`,
+        ref.line
+      ));
+    }
+  }
+  const summary = findings.length === 0 ? "All documented task references resolve to the task surface." : `${findings.length} unresolved task reference${findings.length === 1 ? "" : "s"} in Markdown.`;
+  return checkResult("commands", findings, summary);
+}
+const DEFAULT_STALE_THRESHOLD_DAYS = 30;
+async function listExecPlans(root, kind) {
+  const dir = path.join(root, "docs/exec-plans", kind);
+  try {
+    const entries = await promises.readdir(dir, { withFileTypes: true });
+    return entries.filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".md")).map((entry) => path.posix.join("docs/exec-plans", kind, entry.name)).sort();
+  } catch (_error) {
+    return [];
+  }
+}
+async function checkExecplans(root, options = {}) {
+  const thresholdDays = options.staleThresholdDays ?? DEFAULT_STALE_THRESHOLD_DAYS;
+  const findings = [];
+  const now = Math.floor(Date.now() / 1e3);
+  const thresholdSeconds = thresholdDays * 86400;
+  const activePlans = await listExecPlans(root, "active");
+  const completedPlans = await listExecPlans(root, "completed");
+  const parsedByPath = /* @__PURE__ */ new Map();
+  for (const relpath of [...activePlans, ...completedPlans]) {
+    parsedByPath.set(relpath, parseExecPlan(await readText(path.join(root, relpath))));
+  }
+  const timestampByPath = new Map(await Promise.all(activePlans.map(async (relpath) => {
+    return [relpath, await lastActivityTimestamp(root, relpath)];
+  })));
+  for (const [relpath, parsed] of parsedByPath) {
+    for (const missing of parsed.missingSections) {
+      findings.push(finding(
+        SEVERITY_WARNING,
+        relpath,
+        `ExecPlan is missing required section \`${missing}\`.`,
+        `Add a \`## ${missing}\` section per skills/agentic-legibility/PLANS.md.`
+      ));
+    }
+  }
+  for (const relpath of activePlans) {
+    const parsed = parsedByPath.get(relpath);
+    const timestamp = timestampByPath.get(relpath) ?? null;
+    const isStale = timestamp !== null && now - timestamp > thresholdSeconds;
+    if (isStale) {
+      const days = Math.floor((now - timestamp) / 86400);
+      findings.push(finding(
+        SEVERITY_WARNING,
+        relpath,
+        `Active ExecPlan has had no activity in ${days} days (threshold ${thresholdDays}).`,
+        "Update the Progress and Outcomes sections, or move the plan to docs/exec-plans/completed/."
+      ));
+    }
+    if (parsed.progress.total > 0 && parsed.progress.remaining === 0 && parsed.presentSections.has("Outcomes & Retrospective")) {
+      const outcomesBody = parsed.sectionBodies["Outcomes & Retrospective"] ?? "";
+      if (!outcomesBody.trim()) {
+        findings.push(finding(
+          SEVERITY_WARNING,
+          relpath,
+          "Active ExecPlan has every progress checkbox completed but no Outcomes & Retrospective body.",
+          "Fill in Outcomes & Retrospective, then move the plan to docs/exec-plans/completed/."
+        ));
+      }
+    }
+    if (parsed.presentSections.has("Validation and Acceptance")) {
+      const body = parsed.sectionBodies["Validation and Acceptance"] ?? "";
+      if (!body.trim()) {
+        findings.push(finding(
+          SEVERITY_WARNING,
+          relpath,
+          "ExecPlan section `Validation and Acceptance` is empty.",
+          "Describe how a reader can verify the change works (commands to run, expected outputs, behaviors to observe)."
+        ));
+      }
+    }
+    if (isStale && parsed.progress.total > 0 && parsed.progress.remaining === 1) {
+      findings.push(finding(
+        SEVERITY_WARNING,
+        relpath,
+        "Active ExecPlan has a single unchecked task with no recent activity.",
+        "Either finish the remaining task or split it into smaller pieces and update Progress."
+      ));
+    }
+  }
+  for (const relpath of completedPlans) {
+    const parsed = parsedByPath.get(relpath);
+    if (parsed.progress.remaining > 0) {
+      findings.push(finding(
+        SEVERITY_WARNING,
+        relpath,
+        `Completed ExecPlan still has ${parsed.progress.remaining} unchecked progress item${parsed.progress.remaining === 1 ? "" : "s"}.`,
+        "Either finish the remaining items or move the plan back to docs/exec-plans/active/."
+      ));
+    }
+  }
+  const summary = findings.length === 0 ? `All ExecPlans healthy (${activePlans.length} active, ${completedPlans.length} completed).` : `${findings.length} ExecPlan finding${findings.length === 1 ? "" : "s"} across ${activePlans.length} active and ${completedPlans.length} completed plans.`;
+  return checkResult("execplans", findings, summary);
+}
+const AGENT_DOC_CANDIDATES = [
+  "AGENTS.md",
+  "CLAUDE.md",
+  ".github/copilot-instructions.md"
+];
+function looksLikePath(content) {
+  const trimmed = content.trim();
+  if (!trimmed || /\s/u.test(trimmed)) return false;
+  if (trimmed.startsWith("#")) return false;
+  if (/^https?:\/\//iu.test(trimmed)) return false;
+  if (/^[a-z][a-z0-9+.-]*:/iu.test(trimmed)) return false;
+  if (trimmed.startsWith("/")) return false;
+  if (!trimmed.includes("/")) return false;
+  return true;
+}
+async function repoPathExists(root, relpath) {
+  try {
+    await promises.stat(path.join(root, relpath));
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+async function checkAgentsMd(root, options = {}) {
+  const excludes = options.excludes || [];
+  const files = options.files ?? await walkRepo(root, excludes);
+  const surfaceByRunner = options.surfaceByRunner ?? await collectTaskSurfaceByRunner(root, files);
+  const findings = [];
+  const checkedDocs = [];
+  for (const relpath of AGENT_DOC_CANDIDATES) {
+    if (!await fileExistsInRepo(root, relpath)) continue;
+    const text = await readText(path.join(root, relpath));
+    if (!text) continue;
+    checkedDocs.push(relpath);
+    const parsed = parseMarkdown(text);
+    for (const link of parsed.links) {
+      const href = resolveReference(link, parsed.referenceDefinitions);
+      if (!href || isExternalHref(href)) continue;
+      const { target } = splitHref(href);
+      if (!target) continue;
+      const cleaned = target.startsWith("./") ? target.slice(2) : target;
+      if (cleaned.startsWith("..")) continue;
+      if (!await repoPathExists(root, cleaned)) {
+        findings.push(finding(
+          SEVERITY_ERROR,
+          relpath,
+          `Agent doc links to \`${href}\` but the target does not exist.`,
+          `Update the link or create the target \`${cleaned}\`.`,
+          link.line
+        ));
+      }
+    }
+    for (const span of extractInlineCodeSpans(text)) {
+      if (!looksLikePath(span.content)) continue;
+      const candidate = span.content.trim();
+      if (candidate.startsWith("/") || candidate.startsWith("~")) continue;
+      const normalized = candidate.startsWith("./") ? candidate.slice(2) : candidate;
+      if (normalized.startsWith("..")) continue;
+      if (!await repoPathExists(root, normalized)) {
+        findings.push(finding(
+          SEVERITY_ERROR,
+          relpath,
+          `Agent doc mentions \`${candidate}\` but the path does not exist.`,
+          `Remove the reference or create \`${normalized}\`.`,
+          span.line
+        ));
+      }
+    }
+    for (const ref of extractTaskReferences(text)) {
+      const known = surfaceByRunner[ref.runner];
+      if (!known) continue;
+      if (known.has(ref.token)) continue;
+      findings.push(finding(
+        SEVERITY_ERROR,
+        relpath,
+        `Agent doc names ${RUNNER_LABEL[ref.runner] ?? ref.runner} task \`${ref.token}\` but it is not defined in the task surface.`,
+        `Define \`${ref.token}\` in the ${RUNNER_LABEL[ref.runner] ?? ref.runner} task file or update the doc.`,
+        ref.line
+      ));
+    }
+  }
+  let summary;
+  if (checkedDocs.length === 0) {
+    summary = "No agent docs found to audit.";
+  } else if (findings.length === 0) {
+    summary = `All paths and task commands in agent docs resolve (${checkedDocs.length} doc${checkedDocs.length === 1 ? "" : "s"} checked).`;
+  } else {
+    summary = `${findings.length} broken reference${findings.length === 1 ? "" : "s"} across ${checkedDocs.length} agent doc${checkedDocs.length === 1 ? "" : "s"}.`;
+  }
+  return checkResult("agents_md", findings, summary);
+}
+const CROSS_TOOL_ALIAS_FILES = [
+  "CLAUDE.md",
+  ".github/copilot-instructions.md",
+  ".windsurfrules",
+  "GEMINI.md",
+  "CONVENTIONS.md"
+];
+const CROSS_TOOL_ALIAS_DIRS = [
+  ".cursor/rules"
+];
+function tokenizeAliasContent(text) {
+  const lines = text.split(/\r?\n/u);
+  const sentences = /* @__PURE__ */ new Set();
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.length >= 30) {
+      sentences.add(trimmed.toLowerCase());
+    }
+  }
+  return sentences;
+}
+function jaccardSimilarity(a, b) {
+  if (a.size === 0 && b.size === 0) return 1;
+  let intersection = 0;
+  for (const value of a) {
+    if (b.has(value)) intersection += 1;
+  }
+  const union = a.size + b.size - intersection;
+  if (union === 0) return 1;
+  return intersection / union;
+}
+function aliasIncludesAgentsMd(text) {
+  if (/@\.?\/?AGENTS\.md/u.test(text)) return true;
+  if (/^\s*read:\s*AGENTS\.md\s*$/mu.test(text)) return true;
+  if (/^\s*include:\s*AGENTS\.md\s*$/mu.test(text)) return true;
+  return false;
+}
+async function isSymlink(absolutePath) {
+  try {
+    const stat = await promises.lstat(absolutePath);
+    return stat.isSymbolicLink();
+  } catch (_error) {
+    return false;
+  }
+}
+async function listCursorRuleFiles(root) {
+  const dir = path.join(root, ".cursor", "rules");
+  try {
+    const entries = await promises.readdir(dir, { withFileTypes: true });
+    return entries.filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".mdc")).map((entry) => path.posix.join(".cursor/rules", entry.name)).sort();
+  } catch (_error) {
+    return [];
+  }
+}
+async function checkCrossToolAliases(root) {
+  const findings = [];
+  const agentsAbs = path.join(root, "AGENTS.md");
+  const agentsExists = await pathExists$1(agentsAbs, "file");
+  const agentsText = agentsExists ? await readText(agentsAbs) : "";
+  const agentsSentences = agentsExists ? tokenizeAliasContent(agentsText) : /* @__PURE__ */ new Set();
+  const aliasPaths = [];
+  for (const aliasPath of CROSS_TOOL_ALIAS_FILES) {
+    if (await pathExists$1(path.join(root, aliasPath), "file")) {
+      aliasPaths.push(aliasPath);
+    }
+  }
+  for (const cursorDir of CROSS_TOOL_ALIAS_DIRS) {
+    if (cursorDir === ".cursor/rules") {
+      aliasPaths.push(...await listCursorRuleFiles(root));
+    }
+  }
+  if (!agentsExists) {
+    if (aliasPaths.length >= 2) {
+      let largest = aliasPaths[0];
+      let largestSize = -1;
+      for (const aliasPath of aliasPaths) {
+        try {
+          const stat = await promises.stat(path.join(root, aliasPath));
+          if (stat.size > largestSize) {
+            largestSize = stat.size;
+            largest = aliasPath;
+          }
+        } catch (_error) {
+          continue;
+        }
+      }
+      findings.push(finding(
+        SEVERITY_WARNING,
+        largest,
+        "Multiple cross-tool agent docs but no canonical AGENTS.md.",
+        "Pick AGENTS.md as the source of truth and make the others symlinks or @AGENTS.md includes."
+      ));
+    }
+    const summary2 = findings.length === 0 ? "No AGENTS.md and no cross-tool aliases to compare." : `${findings.length} cross-tool alias issue${findings.length === 1 ? "" : "s"}.`;
+    return checkResult("cross_tool_aliases", findings, summary2);
+  }
+  for (const aliasPath of aliasPaths) {
+    const aliasAbs = path.join(root, aliasPath);
+    if (await isSymlink(aliasAbs)) continue;
+    const aliasText = await readText(aliasAbs);
+    if (!aliasText) continue;
+    if (aliasIncludesAgentsMd(aliasText)) continue;
+    if (aliasText === agentsText) continue;
+    const aliasSentences = tokenizeAliasContent(aliasText);
+    const similarity = jaccardSimilarity(agentsSentences, aliasSentences);
+    if (similarity < 0.5) {
+      findings.push(finding(
+        SEVERITY_WARNING,
+        aliasPath,
+        `Cross-tool alias \`${aliasPath}\` looks substantively different from AGENTS.md (similarity ${similarity.toFixed(2)}).`,
+        `Make \`${aliasPath}\` a symlink to AGENTS.md, or include AGENTS.md (e.g. \`@AGENTS.md\`).`
+      ));
+    }
+  }
+  const summary = findings.length === 0 ? `Cross-tool aliases consistent with AGENTS.md (${aliasPaths.length} alias${aliasPaths.length === 1 ? "" : "es"} checked).` : `${findings.length} cross-tool alias drift finding${findings.length === 1 ? "" : "s"} across ${aliasPaths.length} alias${aliasPaths.length === 1 ? "" : "es"}.`;
+  return checkResult("cross_tool_aliases", findings, summary);
+}
+const CONTEXT_BUDGET_DOCS = [
+  "AGENTS.md",
+  "CLAUDE.md",
+  ".github/copilot-instructions.md"
+];
+const CONTEXT_BUDGET_WARN_TOKENS = 4e3;
+const CONTEXT_BUDGET_ERROR_TOKENS = 8e3;
+async function checkContextBudget(root) {
+  const findings = [];
+  let checkedCount = 0;
+  for (const docPath of CONTEXT_BUDGET_DOCS) {
+    const abs = path.join(root, docPath);
+    let size;
+    try {
+      const stat = await promises.stat(abs);
+      if (!stat.isFile()) continue;
+      size = stat.size;
+    } catch (_error) {
+      continue;
+    }
+    checkedCount += 1;
+    const text = await readText(abs);
+    const tokens = text ? Math.ceil(text.length / 4) : Math.ceil(size / 4);
+    if (tokens > CONTEXT_BUDGET_ERROR_TOKENS) {
+      findings.push(finding(
+        SEVERITY_ERROR,
+        docPath,
+        `Agent doc is approximately ${tokens} tokens (>${CONTEXT_BUDGET_ERROR_TOKENS}); agents typically read ≤ ${CONTEXT_BUDGET_WARN_TOKENS} efficiently.`,
+        "Trim the doc to a one-screen index; push detail into `docs/` and link from here.",
+        1
+      ));
+    } else if (tokens > CONTEXT_BUDGET_WARN_TOKENS) {
+      findings.push(finding(
+        SEVERITY_WARNING,
+        docPath,
+        `Agent doc is approximately ${tokens} tokens (>${CONTEXT_BUDGET_WARN_TOKENS}); consider trimming.`,
+        "Move detail into `docs/` and keep this file as a short index.",
+        1
+      ));
+    }
+  }
+  const summary = findings.length === 0 ? `Agent docs within context budget (${checkedCount} doc${checkedCount === 1 ? "" : "s"} checked).` : `${findings.length} agent doc${findings.length === 1 ? "" : "s"} exceeds the context budget.`;
+  return checkResult("context_budget", findings, summary);
+}
+async function checkReadmeDrift(root) {
+  const readmePath = path.join(root, "README.md");
+  const agentsPath = path.join(root, "AGENTS.md");
+  const readmeExists = await pathExists$1(readmePath, "file");
+  const agentsExists = await pathExists$1(agentsPath, "file");
+  if (!readmeExists || !agentsExists) {
+    return checkResult("readme_drift", [], "README.md or AGENTS.md absent; nothing to compare.");
+  }
+  const readmeText = await readText(readmePath);
+  const agentsText = await readText(agentsPath);
+  const readmeRefs = extractTaskReferences(readmeText);
+  const agentsRefs = extractTaskReferences(agentsText);
+  const byRunnerReadme = /* @__PURE__ */ new Map();
+  const byRunnerAgents = /* @__PURE__ */ new Map();
+  function addRef(map, runner, token, line) {
+    if (!map.has(runner)) map.set(runner, /* @__PURE__ */ new Map());
+    const inner = map.get(runner);
+    if (!inner.has(token)) inner.set(token, line);
+  }
+  for (const ref of readmeRefs) addRef(byRunnerReadme, ref.runner, ref.token, ref.line);
+  for (const ref of agentsRefs) addRef(byRunnerAgents, ref.runner, ref.token, ref.line);
+  const findings = [];
+  const sharedRunners = new Set(
+    Array.from(byRunnerReadme.keys()).filter((r) => byRunnerAgents.has(r))
+  );
+  for (const runner of sharedRunners) {
+    const readmeMap = byRunnerReadme.get(runner);
+    const agentsMap = byRunnerAgents.get(runner);
+    const runnerLabel = RUNNER_LABEL[runner] ?? runner;
+    for (const [token, line] of readmeMap.entries()) {
+      if (!agentsMap.has(token)) {
+        findings.push(finding(
+          SEVERITY_WARNING,
+          "README.md",
+          `README.md uses ${runnerLabel} task \`${token}\` but AGENTS.md does not mention it (drift).`,
+          "Align the two docs: either update AGENTS.md to match, or pick one canonical command and reference it from both.",
+          line
+        ));
+      }
+    }
+    for (const [token, line] of agentsMap.entries()) {
+      if (!readmeMap.has(token)) {
+        findings.push(finding(
+          SEVERITY_WARNING,
+          "AGENTS.md",
+          `AGENTS.md uses ${runnerLabel} task \`${token}\` but README.md does not mention it (drift).`,
+          "Align the two docs: either update README.md to match, or pick one canonical command and reference it from both.",
+          line
+        ));
+      }
+    }
+  }
+  const summary = findings.length === 0 ? "README.md and AGENTS.md describe the same tasks consistently." : `${findings.length} task drift finding${findings.length === 1 ? "" : "s"} between README.md and AGENTS.md.`;
+  return checkResult("readme_drift", findings, summary);
+}
+async function rootPackageJsonHasWorkspaces(root) {
+  const text = await readText(path.join(root, "package.json"));
+  if (!text) return false;
+  try {
+    const parsed = JSON.parse(text);
+    if (typeof parsed !== "object" || parsed === null) return false;
+    const ws = parsed.workspaces;
+    if (Array.isArray(ws) && ws.length > 0) return true;
+    if (ws && typeof ws === "object" && Array.isArray(ws.packages)) {
+      return ws.packages.length > 0;
+    }
+    return false;
+  } catch (_error) {
+    return false;
+  }
+}
+async function checkNesting(root, options = {}) {
+  const excludes = options.excludes || [];
+  const files = options.files ?? await walkRepo(root, excludes);
+  const hasPnpmWorkspaces = files.includes("pnpm-workspace.yaml") || files.includes("pnpm-workspace.yml");
+  const hasNxJson = files.includes("nx.json");
+  const projectJsonFiles = files.filter((f) => path.posix.basename(f) === "project.json");
+  const hasTurboJson = files.includes("turbo.json");
+  const rootHasWorkspaces = files.includes("package.json") && await rootPackageJsonHasWorkspaces(root);
+  const isMonorepo = hasPnpmWorkspaces || hasNxJson || hasTurboJson || rootHasWorkspaces || projectJsonFiles.length > 0;
+  if (!isMonorepo) {
+    return checkResult("nesting", [], "Not a monorepo; per-package AGENTS.md not required.");
+  }
+  const packageDirs = /* @__PURE__ */ new Set();
+  for (const projectJson of projectJsonFiles) {
+    const dir = path.posix.dirname(projectJson);
+    if (dir && dir !== ".") packageDirs.add(dir);
+  }
+  if (rootHasWorkspaces || hasPnpmWorkspaces || hasTurboJson) {
+    for (const file of files) {
+      if (path.posix.basename(file) === "package.json" && file !== "package.json") {
+        const dir = path.posix.dirname(file);
+        packageDirs.add(dir);
+      }
+    }
+  }
+  if (packageDirs.size === 0) {
+    return checkResult("nesting", [], "Monorepo detected but no package directories discovered.");
+  }
+  const findings = [];
+  const present = [];
+  const missing = [];
+  for (const dir of Array.from(packageDirs).sort()) {
+    const hasAgents = files.includes(`${dir}/AGENTS.md`);
+    const hasClaude = files.includes(`${dir}/CLAUDE.md`);
+    if (hasAgents || hasClaude) {
+      present.push(dir);
+    } else {
+      missing.push(dir);
+    }
+  }
+  const total = packageDirs.size;
+  const ratio = present.length / total;
+  const halfOrMore = ratio >= 0.5;
+  for (const dir of missing) {
+    const message = halfOrMore ? `Most workspace packages have AGENTS.md; consider adding one to \`${dir}\` for consistency.` : `Workspace package \`${dir}\` lacks AGENTS.md; subtree-specific guidance helps agents stay scoped.`;
+    findings.push(finding(
+      SEVERITY_WARNING,
+      dir,
+      message,
+      `Add \`${dir}/AGENTS.md\` describing the package's purpose, primary commands, and links to its docs.`
+    ));
+  }
+  const summary = findings.length === 0 ? `All ${total} workspace package${total === 1 ? "" : "s"} have a per-package agent doc.` : `${present.length}/${total} workspace package${total === 1 ? "" : "s"} have AGENTS.md; ${missing.length} missing.`;
+  return checkResult("nesting", findings, summary);
+}
+const REPO_MAP_CANDIDATES = [
+  "docs/repo-map.md",
+  "docs/architecture.md",
+  "ARCHITECTURE.md"
+];
+async function checkRepoMap(root) {
+  for (const candidate of REPO_MAP_CANDIDATES) {
+    if (await pathExists$1(path.join(root, candidate), "file")) {
+      return checkResult("repo_map", [], `Repo map found at \`${candidate}\`.`);
+    }
+  }
+  const findings = [finding(
+    SEVERITY_WARNING,
+    ".",
+    "No repo map found.",
+    "Add `docs/repo-map.md` or `ARCHITECTURE.md` describing module boundaries, allowed dependency directions, and where each subsystem lives."
+  )];
+  return checkResult("repo_map", findings, "No repo map found.");
+}
+function isAdrFile(relpath) {
+  const lower = relpath.toLowerCase();
+  if (!/(?:\.md|\.mdx)$/u.test(lower)) return false;
+  return /(^|\/)(adr|adrs|decisions?)\//u.test(lower);
+}
+async function checkAdrs(root, options = {}) {
+  const excludes = options.excludes || [];
+  const files = options.files ?? await walkRepo(root, excludes);
+  const adrFiles = files.filter(isAdrFile).sort();
+  if (adrFiles.length === 0) {
+    return checkResult("adrs", [], "No ADRs detected.");
+  }
+  const findings = [];
+  const adrDirs = new Set(adrFiles.map((f) => path.posix.dirname(f)));
+  for (const dir of adrDirs) {
+    const hasIndex = files.some((f) => {
+      const lower = f.toLowerCase();
+      return lower === `${dir.toLowerCase()}/readme.md` || lower === `${dir.toLowerCase()}/index.md`;
+    });
+    if (!hasIndex) {
+      findings.push(finding(
+        SEVERITY_WARNING,
+        dir,
+        "ADR directory has no index (`README.md` or `index.md`).",
+        `Add \`${dir}/README.md\` listing each ADR with title, date, and status.`
+      ));
+    }
+  }
+  for (const adrPath of adrFiles) {
+    const lower = path.posix.basename(adrPath).toLowerCase();
+    if (lower === "readme.md" || lower === "index.md") continue;
+    const text = await readText(path.join(root, adrPath));
+    if (!text) continue;
+    const parsed = parseMarkdown(text);
+    const headings = new Set(parsed.headings.map((h) => h.text.toLowerCase().trim()));
+    const sectionMatches = ["status", "context", "decision"].filter((name) => {
+      return Array.from(headings).some((h) => h === name || h.startsWith(`${name} `) || h.startsWith(`${name}:`));
+    }).length;
+    if (sectionMatches < 2) {
+      findings.push(finding(
+        SEVERITY_WARNING,
+        adrPath,
+        "ADR is missing standard sections (Status / Context / Decision).",
+        "Add headings for Status, Context, and Decision so the record is self-explanatory."
+      ));
+    }
+    const supersededMatch = text.match(/superseded\s+by[^\n]*\[([^\]]+)\]\(([^)\s]+)\)/iu);
+    if (supersededMatch) {
+      const href = supersededMatch[2];
+      if (!isExternalHref(href)) {
+        const resolved = resolveLinkTarget(adrPath, href);
+        if (resolved.target && !resolved.target.startsWith("..")) {
+          const exists = await fileExistsInRepo(root, resolved.target);
+          if (!exists) {
+            findings.push(finding(
+              SEVERITY_ERROR,
+              adrPath,
+              `ADR claims supersession by \`${href}\` but the target does not exist.`,
+              "Update the link to point at the actual successor ADR or remove the supersession claim."
+            ));
+          }
+        }
+      }
+    }
+  }
+  const summary = findings.length === 0 ? `All ${adrFiles.length} ADR${adrFiles.length === 1 ? "" : "s"} look healthy.` : `${findings.length} ADR finding${findings.length === 1 ? "" : "s"} across ${adrFiles.length} file${adrFiles.length === 1 ? "" : "s"}.`;
+  return checkResult("adrs", findings, summary);
+}
+const AVAILABLE_CHECKS = {
+  artifacts: checkArtifacts,
+  links: checkLinks,
+  commands: checkCommands,
+  execplans: checkExecplans,
+  agents_md: checkAgentsMd,
+  cross_tool_aliases: checkCrossToolAliases,
+  context_budget: checkContextBudget,
+  readme_drift: checkReadmeDrift,
+  nesting: checkNesting,
+  repo_map: checkRepoMap,
+  adrs: checkAdrs
+};
+const CHECKS_USING_FILES = /* @__PURE__ */ new Set(["links", "commands", "agents_md", "nesting", "adrs"]);
+const CHECKS_USING_SURFACE = /* @__PURE__ */ new Set(["commands", "agents_md"]);
+async function runAudit(root, selectedChecks, options = {}) {
+  const results = {};
+  const names = selectedChecks.length > 0 ? selectedChecks : Object.keys(AVAILABLE_CHECKS);
+  for (const name of names) {
+    if (!AVAILABLE_CHECKS[name]) {
+      throw new Error(`Unknown check: ${name}. Valid checks: ${Object.keys(AVAILABLE_CHECKS).join(", ")}`);
+    }
+  }
+  const shared = { ...options };
+  if (!shared.files && names.some((name) => CHECKS_USING_FILES.has(name))) {
+    shared.files = await walkRepo(root, shared.excludes || []);
+  }
+  if (!shared.surfaceByRunner && shared.files && names.some((name) => CHECKS_USING_SURFACE.has(name))) {
+    shared.surfaceByRunner = await collectTaskSurfaceByRunner(root, shared.files);
+  }
+  for (const name of names) {
+    results[name] = await AVAILABLE_CHECKS[name](root, shared);
+  }
+  return auditReport(root, results);
+}
+function parseCliArgs(argv) {
+  const args = {
+    repo: ".",
+    format: "json",
+    checks: [],
+    runAll: false
+  };
+  const positionals = [];
+  const checkFlags = new Set(Object.keys(AVAILABLE_CHECKS).map((name) => `--check-${name.replaceAll("_", "-")}`));
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--format") {
+      const value = argv[index + 1];
+      if (value !== "json" && value !== "markdown") {
+        throw new Error("--format requires either json or markdown");
+      }
+      args.format = value;
+      index += 1;
+    } else if (arg === "--stale-threshold-days") {
+      const value = argv[index + 1];
+      if (!value || !/^\d+$/u.test(value) || Number.parseInt(value, 10) < 1) {
+        throw new Error("--stale-threshold-days requires a positive integer number of days");
+      }
+      args.staleThresholdDays = Number.parseInt(value, 10);
+      index += 1;
+    } else if (arg === "--check-all") {
+      args.runAll = true;
+    } else if (checkFlags.has(arg)) {
+      const name = arg.replace(/^--check-/u, "").replaceAll("-", "_");
+      args.checks.push(name);
+    } else if (arg.startsWith("--")) {
+      throw new Error(`Unknown option: ${arg}`);
+    } else {
+      positionals.push(arg);
+    }
+  }
+  if (positionals.length > 1) {
+    throw new Error("Only one repository path may be provided.");
+  }
+  if (positionals.length === 1) {
+    args.repo = positionals[0];
+  }
+  if (!args.runAll && args.checks.length === 0) {
+    throw new Error(`Specify at least one check flag, or use --check-all. Valid: ${Array.from(checkFlags).sort().join(", ")}, --check-all.`);
+  }
+  return args;
+}
+async function runCli(argv = process.argv.slice(2)) {
+  const args = parseCliArgs(argv);
+  const root = path.resolve(args.repo);
+  if (!await isDirectory(root)) {
+    throw new Error(`Repository path does not exist or is not a directory: ${root}`);
+  }
+  const checks = args.runAll ? Object.keys(AVAILABLE_CHECKS) : args.checks;
+  const singleCheck = checks.length === 1 && !args.runAll;
+  const options = { staleThresholdDays: args.staleThresholdDays };
+  if (singleCheck) {
+    const name = checks[0];
+    const runner = AVAILABLE_CHECKS[name];
+    const result = await runner(root, options);
+    const output2 = args.format === "markdown" ? formatSingleCheckMarkdown(result) : formatSingleCheckJson(result);
+    process.stdout.write(`${output2}
+`);
+    if (result.status === "drift") {
+      process.exitCode = 1;
+    }
+    return;
+  }
+  const report = await runAudit(root, checks, options);
+  const output = args.format === "markdown" ? formatAuditMarkdown(report) : formatJson(report);
+  process.stdout.write(`${output}
+`);
+  if (report.status === "drift") {
+    process.exitCode = 1;
+  }
+}
+const PLANS_TEMPLATE = '# Codex Execution Plans (ExecPlans)\n\nThis document describes the requirements for an execution plan\n("ExecPlan"), a design document that a coding agent can follow to\ndeliver a working feature or system change. Treat the reader as a\ncomplete beginner to this repository: they have only the current\nworking tree and the single ExecPlan file you provide. There is no\nmemory of prior plans and no external context.\n\n## How to use ExecPlans and PLANS.md\n\nWhen authoring an executable specification (ExecPlan), follow PLANS.md\nto the letter. If it is not in your context, refresh your memory by\nreading the entire PLANS.md file. Be thorough in reading and re-reading\nsource material to produce an accurate specification. When creating a\nspec, start from the skeleton and flesh it out as you do your research.\n\nIn this repository, store in-progress checked-in ExecPlans under\n`docs/exec-plans/active/`. When an ExecPlan is complete and its\n`Outcomes & Retrospective` section has been fully updated, move it to\n`docs/exec-plans/completed/` and update the relevant indexes so the\nactive and completed plan lists stay accurate.\n\nWhen implementing an executable specification (ExecPlan), do not prompt\nthe user for next steps; simply proceed to the next milestone. Keep all\nsections up to date, add or split entries in the list at every stopping\npoint to affirmatively state the progress made and next steps. Resolve\nambiguities autonomously, and commit frequently.\n\nWhen discussing an executable specification (ExecPlan), record\ndecisions in a log in the spec for posterity; it should be\nunambiguously clear why any change to the specification was made.\nExecPlans are living documents, and it should always be possible to\nrestart from only the ExecPlan and no other work.\n\nWhen researching a design with challenging requirements or significant\nunknowns, use milestones to implement proof of concepts, toy\nimplementations, and similar de-risking work that validates whether the\nproposal is feasible. Read the source code of libraries by finding or\nacquiring them, research deeply, and include prototypes to guide a\nfuller implementation.\n\n## Requirements\n\nNON-NEGOTIABLE REQUIREMENTS:\n\n   * Every ExecPlan must be fully self-contained. Self-contained means\n     that in its current form it contains all knowledge and\n     instructions needed for a novice to succeed.\n   * Every ExecPlan is a living document. Contributors are required to\n     revise it as progress is made, as discoveries occur, and as design\n     decisions are finalized. Each revision must remain fully\n     self-contained.\n   * Every ExecPlan must enable a complete novice to implement the\n     feature end-to-end without prior knowledge of this repo.\n   * Every ExecPlan must produce a demonstrably working behavior, not\n     merely code changes to meet a definition.\n   * Every ExecPlan must define every term of art in plain language or\n     do not use it.\n\nPurpose and intent come first. Begin by explaining, in a few sentences,\nwhy the work matters from a user\'s perspective: what someone can do\nafter this change that they could not do before, and how to see it\nworking. Then guide the reader through the exact steps to achieve that\noutcome, including what to edit, what to run, and what they should\nobserve.\n\nThe agent executing your plan can list files, read files, search, run\nthe project, and run tests. It does not know any prior context and\ncannot infer what you meant from earlier milestones. Repeat any\nassumption you rely on. Do not point to external blogs or docs; if\nknowledge is required, embed it in the plan itself in your own words.\nIf an ExecPlan builds upon a prior ExecPlan and that file is checked\nin, incorporate it by reference. If it is not, you must include all\nrelevant context from that plan.\n\n## Formatting\n\nFormat and envelope are simple and strict. Each ExecPlan must be one\nsingle fenced code block labeled as `md` that begins and ends with\ntriple backticks. Do not nest additional triple-backtick code fences\ninside; when you need to show commands, transcripts, diffs, or code,\npresent them as indented blocks within that single fence. Use\nindentation for clarity rather than code fences inside an ExecPlan to\navoid prematurely closing the ExecPlan\'s code fence. Use two newlines\nafter every heading, use `#`, `##`, and so on, and correct syntax for\nordered and unordered lists.\n\nWhen writing an ExecPlan to a Markdown (`.md`) file where the content of\nthe file is only the single ExecPlan, you should omit the triple\nbackticks.\n\nWrite in plain prose. Prefer sentences over lists. Avoid checklists,\ntables, and long enumerations unless brevity would obscure meaning.\nChecklists are permitted only in the `Progress` section, where they are\nmandatory. Narrative sections must remain prose-first.\n\n## Guidelines\n\nSelf-containment and plain language are paramount. If you introduce a\nphrase that is not ordinary English ("daemon", "middleware", "RPC\ngateway", "filter graph"), define it immediately and remind the reader\nhow it manifests in this repository, for example by naming the files or\ncommands where it appears. Do not say as defined previously or\naccording to the architecture doc. Include the needed explanation here,\neven if you repeat yourself.\n\nAvoid common failure modes. Do not rely on undefined jargon. Do not\ndescribe the letter of a feature so narrowly that the resulting code\ncompiles but does nothing meaningful. Do not outsource key decisions to\nthe reader. When ambiguity exists, resolve it in the plan itself and\nexplain why you chose that path. Err on the side of over-explaining\nuser-visible effects and under-specifying incidental implementation\ndetails.\n\nAnchor the plan with observable outcomes. State what the user can do\nafter implementation, the commands to run, and the outputs they should\nsee. Acceptance should be phrased as behavior a human can verify rather\nthan internal attributes. If a change is internal, explain how its\nimpact can still be demonstrated, for example by running tests that\nfail before and pass after, and by showing a scenario that uses the new\nbehavior.\n\nSpecify repository context explicitly. Name files with full\nrepository-relative paths, name functions and modules precisely, and\ndescribe where new files should be created. If touching multiple areas,\ninclude a short orientation paragraph that explains how those parts fit\ntogether so a novice can navigate confidently. When running commands,\nshow the working directory and exact command line. When outcomes depend\non environment, state the assumptions and provide alternatives when\nreasonable.\n\nBe idempotent and safe. Write the steps so they can be run multiple\ntimes without causing damage or drift. If a step can fail halfway,\ninclude how to retry or adapt. If a migration or destructive operation\nis necessary, spell out backups or safe fallbacks. Prefer additive,\ntestable changes that can be validated as you go.\n\nValidation is not optional. Include instructions to run tests, to start\nthe system if applicable, and to observe it doing something useful.\nDescribe comprehensive testing for any new features or capabilities.\nInclude expected outputs and error messages so a novice can tell\nsuccess from failure. Where possible, show how to prove that the change\nis effective beyond compilation, for example through a small end-to-end\nscenario, a CLI invocation, or an HTTP request and response transcript.\nState the exact test commands appropriate to the project\'s toolchain\nand how to interpret their results.\n\nCapture evidence. When your steps produce terminal output, short diffs,\nor logs, include them as indented examples. Keep them concise and\nfocused on what proves success. If you need to include a patch, prefer\nfile-scoped diffs or small excerpts that a reader can recreate by\nfollowing your instructions rather than pasting large blobs.\n\n## Milestones\n\nMilestones are narrative, not bureaucracy. If you break the work into\nmilestones, introduce each with a brief paragraph that describes the\nscope, what will exist at the end of the milestone that did not exist\nbefore, the commands to run, and the acceptance you expect to observe.\nKeep it readable as a story: goal, work, result, proof. Progress and\nmilestones are distinct: milestones tell the story, progress tracks\ngranular work. Both must exist. Never abbreviate a milestone merely for\nthe sake of brevity, and do not leave out details that could be crucial\nto a future implementation.\n\nEach milestone must be independently verifiable and incrementally\nimplement the overall goal of the execution plan.\n\n## Living plans and design decisions\n\n   * ExecPlans are living documents. As you make key design decisions,\n     update the plan to record both the decision and the thinking\n     behind it. Record all decisions in the `Decision Log` section.\n   * ExecPlans must contain and maintain a `Progress` section, a\n     `Surprises & Discoveries` section, a `Decision Log`, and an\n     `Outcomes & Retrospective` section. These are not optional.\n   * When you discover optimizer behavior, performance tradeoffs,\n     unexpected bugs, or similar findings that shaped your approach,\n     capture those observations in the `Surprises & Discoveries`\n     section with short evidence snippets. Test output is ideal.\n   * If you change course mid-implementation, document why in the\n     `Decision Log` and reflect the implications in `Progress`. Plans\n     are guides for the next contributor as much as checklists for you.\n   * At completion of a major task or the full plan, write an\n     `Outcomes & Retrospective` entry summarizing what was achieved,\n     what remains, and lessons learned.\n\n## Prototyping milestones and parallel implementations\n\nIt is acceptable, and often encouraged, to include explicit prototyping\nmilestones when they de-risk a larger change. Examples include adding a\nlow-level operator to a dependency to validate feasibility, or\nexploring two composition orders while measuring optimizer effects.\nKeep prototypes additive and testable. Clearly label the scope as\nprototyping, describe how to run and observe results, and state the\ncriteria for promoting or discarding the prototype. Prefer additive\ncode changes followed by subtractions that keep tests passing.\n\nParallel implementations, for example keeping an adapter alongside an\nolder path during migration, are fine when they reduce risk or enable\ntests to continue passing during a large migration. Describe how to\nvalidate both paths and how to retire one safely with tests. When\nworking with multiple new libraries or feature areas, consider creating\nspikes that evaluate the feasibility of those features independently,\nproving that the external library performs as expected and implements\nthe features needed in isolation.\n\n## Skeleton of a Good ExecPlan\n\n## <Short, action-oriented description>\n\nThis ExecPlan is a living document. The sections `Progress`,\n`Surprises & Discoveries`, `Decision Log`, and `Outcomes &\nRetrospective` must be kept up to date as work proceeds. If `PLANS.md`\nis checked into the repo, reference its repository-root path here and\nnote that this document must be maintained in accordance with it.\n\n## Purpose / Big Picture\n\nExplain in a few sentences what someone gains after this change and how\nthey can see it working. State the user-visible behavior you will\nenable.\n\n## Progress\n\nUse a list with checkboxes to summarize granular steps. Every stopping\npoint must be documented here, even if it requires splitting a\npartially completed task into two, such as completed versus remaining\nwork. This section must always reflect the actual current state of the\nwork.\n\n   * [x] (2025-10-01 13:00Z) Example completed step.\n   * [ ] Example incomplete step.\n   * [ ] Example partially completed step (completed: X; remaining: Y).\n\nUse timestamps to measure rates of progress.\n\n## Surprises & Discoveries\n\nDocument unexpected behaviors, bugs, optimizations, or insights\ndiscovered during implementation. Provide concise evidence.\n\n   * Observation: ... Evidence: ...\n\n## Decision Log\n\nRecord every decision made while working on the plan in the format:\n\n   * Decision: ... Rationale: ... Date/Author: ...\n\n## Outcomes & Retrospective\n\nSummarize outcomes, gaps, and lessons learned at major milestones or at\ncompletion. Compare the result against the original purpose.\n\n## Context and Orientation\n\nDescribe the current state relevant to this task as if the reader knows\nnothing. Name the key files and modules by full repository-relative\npath. Define any non-obvious term you will use. Do not refer to prior\nplans.\n\n## Plan of Work\n\nDescribe, in prose, the sequence of edits and additions. For each edit,\nname the file and location, such as the function or module, and what to\ninsert or change. Keep it concrete and minimal.\n\n## Concrete Steps\n\nState the exact commands to run and where to run them, including the\nworking directory. When a command generates output, show a short\nexpected transcript so the reader can compare. This section must be\nupdated as work proceeds.\n\n## Validation and Acceptance\n\nDescribe how to start or exercise the system and what to observe.\nPhrase acceptance as behavior, with specific inputs and outputs. If\ntests are involved, say to run the project\'s test command and describe\nwhat should pass, including any new test that fails before the change\nand passes after.\n\n## Idempotence and Recovery\n\nIf steps can be repeated safely, say so. If a step is risky, provide a\nsafe retry or rollback path. Keep the environment clean after\ncompletion.\n\n## Artifacts and Notes\n\nInclude the most important transcripts, diffs, or snippets as indented\nexamples. Keep them concise and focused on what proves success.\n\n## Interfaces and Dependencies\n\nBe prescriptive. Name the libraries, modules, and services to use and\nwhy. Specify the types, traits or interfaces, and function signatures\nthat must exist at the end of the milestone. Prefer stable names and\npaths such as `crate::module::function` or `package.submodule.Interface`.\n\nFor example:\n\n```rust\nIn crates/foo/planner.rs, define:\npub trait Planner {\n    fn plan(&self, observed: &Observed) -> Vec<Action>;\n}\n```\n\nIf you follow the guidance above, a single stateless agent, or a human\nnovice, can read your ExecPlan from top to bottom and produce a\nworking, observable result. That is the bar: self-contained,\nself-sufficient, novice-guiding, and outcome-focused.\n\nWhen you revise a plan, you must ensure your changes are comprehensively\nreflected across all sections, including the living document sections,\nand you must write a note at the bottom of the plan describing the\nchange and the reason why. ExecPlans must describe not just the what\nbut the why for almost everything.\n';
+const AGENTS_MD = [
+  "# Agents",
+  "",
+  "This file is the canonical entry point for AI coding agents working in",
+  "this repository. Keep it short — under one screen — and link out to",
+  "detail rather than inlining it. Other agent tools (Claude, Cursor,",
+  "Copilot, Gemini, Aider, Windsurf) read this file by convention; alias",
+  "files like `CLAUDE.md` should include or symlink to it rather than",
+  "duplicate its content.",
+  "",
+  "## Orientation",
+  "",
+  "- See [docs/README.md](docs/README.md) for a map of the docs tree.",
+  "- See [.agents/PLANS.md](.agents/PLANS.md) for ExecPlan conventions.",
+  "- Active execution plans live under `docs/exec-plans/active/`.",
+  "- Completed plans live under `docs/exec-plans/completed/`.",
+  "",
+  "## Primary commands",
+  "",
+  "Replace this list with the actual commands a fresh agent needs to",
+  "install dependencies, run tests, and start the project.",
+  "",
+  "- Install: _TODO_",
+  "- Test:    _TODO_",
+  "- Lint:    _TODO_",
+  "- Run:     _TODO_",
+  "",
+  "## Architecture",
+  "",
+  "Describe module boundaries and where each subsystem lives, or link to",
+  "a repo map (for example an `ARCHITECTURE.md` at the repo root) that does.",
+  "",
+  "## Working agreements",
+  "",
+  "- Follow the ExecPlan format described in `.agents/PLANS.md` for any",
+  "  non-trivial change.",
+  "- Keep this file updated as commands and architecture evolve — agents",
+  "  read it cold.",
+  ""
+].join("\n");
+const CLAUDE_MD = "@AGENTS.md\n";
+const DOCS_README = [
+  "# Documentation",
+  "",
+  "This directory holds long-form project documentation. Two conventions",
+  "matter most for AI coding agents:",
+  "",
+  "- `exec-plans/active/` — execution plans currently being worked on.",
+  "- `exec-plans/completed/` — finished plans, kept for posterity.",
+  "",
+  "The format and lifecycle of an ExecPlan is defined in",
+  "[../.agents/PLANS.md](../.agents/PLANS.md).",
+  "",
+  "## Suggested layout",
+  "",
+  "- `docs/repo-map.md` or `ARCHITECTURE.md` — one-screen architecture",
+  "  index covering module boundaries and allowed dependency directions.",
+  "- `docs/adr/` — architecture decision records, with a directory-local",
+  "  `README.md` index and consistent supersession links.",
+  ""
+].join("\n");
+function getTemplates() {
+  return [
+    { path: "AGENTS.md", contents: AGENTS_MD },
+    { path: "CLAUDE.md", contents: CLAUDE_MD },
+    { path: ".agents/PLANS.md", contents: PLANS_TEMPLATE },
+    { path: "docs/README.md", contents: DOCS_README },
+    { path: "docs/exec-plans/active/.gitkeep", contents: "" },
+    { path: "docs/exec-plans/completed/.gitkeep", contents: "" }
+  ];
+}
+async function pathExists(absPath) {
+  try {
+    await promises.access(absPath);
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+async function writeTemplate(root, template, force) {
+  const absPath = path.join(root, template.path);
+  if (!force && await pathExists(absPath)) {
+    return "skipped";
+  }
+  await promises.mkdir(path.dirname(absPath), { recursive: true });
+  await promises.writeFile(absPath, template.contents, "utf8");
+  return "created";
+}
+async function runInit(root, options = {}) {
+  const force = options.force === true;
+  const absRoot = path.resolve(root);
+  await promises.mkdir(absRoot, { recursive: true });
+  const created = [];
+  const skipped = [];
+  for (const template of getTemplates()) {
+    const outcome = await writeTemplate(absRoot, template, force);
+    if (outcome === "created") created.push(template.path);
+    else skipped.push(template.path);
+  }
+  return { root: absRoot, created, skipped };
+}
+async function runInitCli(argv) {
+  let force = false;
+  const positional = [];
+  for (const arg of argv) {
+    if (arg === "--force" || arg === "-f") {
+      force = true;
+    } else if (arg === "--help" || arg === "-h") {
+      process.stdout.write([
+        "Usage: legibility init [--force] [path]",
+        "",
+        "Scaffolds the required-artifact tree from templates: AGENTS.md,",
+        "CLAUDE.md, .agents/PLANS.md, docs/README.md, and the exec-plans",
+        "directories. Existing files are skipped unless --force is set.",
+        ""
+      ].join("\n"));
+      return;
+    } else if (arg.startsWith("--")) {
+      throw new Error(`Unknown flag for init: ${arg}`);
+    } else {
+      positional.push(arg);
+    }
+  }
+  if (positional.length > 1) {
+    throw new Error(`init takes at most one path argument, got ${positional.length}`);
+  }
+  const target = positional[0] ?? ".";
+  const result = await runInit(target, { force });
+  process.stdout.write(`${JSON.stringify(result, null, 2)}
+`);
+}
+const USAGE = [
+  "Usage: legibility <subcommand> [options]",
+  "",
+  "Subcommands:",
+  "  score <path>             Produce the eight-dimension legibility report.",
+  "  list-scopes <path>       List detected scopes in the repo.",
+  "  list-metrics             List the available scoring metrics.",
+  "  audit [flags] <path>     Run mechanical audit checks.",
+  "  init [--force] <path>    Scaffold AGENTS.md, CLAUDE.md, .agents/, docs/.",
+  "",
+  "Audit flags:",
+  "  --check-artifacts            Verify required legibility artifacts exist.",
+  "  --check-links                Find broken Markdown links, anchors, and orphan docs.",
+  "  --check-commands             Flag doc references to tasks not in the task surface.",
+  "  --check-execplans            Check ExecPlan sections, progress, and staleness.",
+  "  --check-agents-md            Validate paths and commands in root agent docs.",
+  "  --check-cross-tool-aliases   Detect drift between AGENTS.md and tool-specific aliases.",
+  "  --check-context-budget       Warn when an agent doc exceeds the context budget.",
+  "  --check-readme-drift         Compare commands between README.md and AGENTS.md.",
+  "  --check-nesting              In monorepos, look for per-package AGENTS.md.",
+  "  --check-repo-map             Require a one-screen architecture index.",
+  "  --check-adrs                 Validate ADR sections, index, and supersession links.",
+  "  --check-all                  Run every audit check and emit an aggregate report.",
+  "  --stale-threshold-days N     Staleness threshold for --check-execplans (default 30).",
+  "",
+  "Shared flags:",
+  "  --format json|markdown   Output format (default: json).",
+  "",
+  "Examples:",
+  "  legibility score .",
+  "  legibility audit --check-all --format markdown ."
+].join("\n");
+async function runDispatcher(argv = process.argv.slice(2)) {
+  if (argv.length === 0 || argv[0] === "help" || argv[0] === "--help" || argv[0] === "-h") {
+    process.stdout.write(`${USAGE}
+`);
+    return;
+  }
+  const subcommand = argv[0];
+  const rest = argv.slice(1);
+  switch (subcommand) {
+    case "score":
+      return await runCli$1(rest);
+    case "list-scopes":
+      return await runCli$1([...rest, "--list-scopes"]);
+    case "list-metrics":
+      return await runCli$1([...rest, "--list-metrics"]);
+    case "audit":
+      return await runCli(rest);
+    case "init":
+    case "generate-templates":
+      return await runInitCli(rest);
+    default:
+      throw new Error(`Unknown subcommand: ${subcommand}. Valid: score, list-scopes, list-metrics, audit, init.`);
+  }
+}
+const invokedAsMain = (() => {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return realpathSync(path.resolve(entry)) === realpathSync(fileURLToPath(import.meta.url));
+  } catch (_error) {
+    return false;
+  }
+})();
+if (invokedAsMain) {
+  try {
+    await runDispatcher();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`${message}
+`);
+    process.exitCode = 2;
+  }
+}
+export {
+  runDispatcher
+};

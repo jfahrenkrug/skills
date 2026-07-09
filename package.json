@@ -1,0 +1,5 @@
+{
+  "name": "skills",
+  "private": true,
+  "workspaces": ["packages/*"]
+}

@@ -1,58 +1,22 @@
-#!/usr/bin/env node
-
-import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import {
+   DOC_EXTENSIONS,
+   readText,
+   isDirectory,
+   rel,
+   toPosix,
+   walkRepo,
+} from './lib/fs_walk.js';
+import {
+   MANIFEST_FILE_NAMES,
+   categorizeTaskSurface,
+   collectAllTaskSurfaces,
+} from './languages/index.js';
 
-const IGNORED_DIRS = new Set([
-   '.git',
-   '.hg',
-   '.mypy_cache',
-   '.next',
-   '.nuxt',
-   '.pytest_cache',
-   '.svn',
-   '.turbo',
-   '.venv',
-   '.yarn',
-   '__pycache__',
-   'build',
-   'coverage',
-   'dist',
-   'node_modules',
-   'out',
-   'target',
-   'vendor',
-]);
-const DOC_EXTENSIONS = new Set([ '.md', '.mdx', '.rst', '.txt' ]);
-const MAX_TEXT_SIZE = 250_000;
 const MAX_EVIDENCE = 5;
 const ROOT_SCOPE = '.';
 const AGENT_DOC_NAMES = new Set([ 'agents.md', 'claude.md', 'copilot-instructions.md' ]);
 const ROOT_AGENT_DOC_PATHS = new Set([ 'AGENTS.md', 'CLAUDE.md', '.github/copilot-instructions.md' ]);
-const TASK_FILE_NAMES = new Set([ 'makefile', 'justfile', 'taskfile.yml', 'taskfile.yaml', 'package.json' ]);
-const MANIFEST_FILE_NAMES = new Set([
-   'build.gradle',
-   'build.gradle.kts',
-   'cargo.toml',
-   'gemfile',
-   'go.mod',
-   'mix.exs',
-   'package.json',
-   'pom.xml',
-   'pyproject.toml',
-   'requirements.txt',
-]);
-const TASK_FILE_PATTERNS = [
-   'Makefile',
-   'makefile',
-   'justfile',
-   'Justfile',
-   'Taskfile.yml',
-   'Taskfile.yaml',
-   'package.json',
-   '.cargo/config.toml',
-   '.cargo/config',
-];
 const CORE_DOC_NAMES = new Set([
    'agents.md',
    'claude.md',
@@ -66,10 +30,14 @@ const METRIC_NAMES = [
    'task_entrypoints',
    'validation_harness',
    'lint_format_gates',
+   'guardrails_and_hooks',
    'agent_repo_map',
    'structured_docs',
    'decision_records',
-];
+] as const;
+
+type MetricName = typeof METRIC_NAMES[number];
+
 const ROOT_MAP_DOCS = [
    'AGENTS.md',
    'CLAUDE.md',
@@ -90,251 +58,48 @@ const GENERIC_NESTED_SCOPE_SEGMENTS = [
    /^\.[a-z0-9_-]+$/u,
 ];
 
-function toPosix(value) {
-   return value.split(path.sep).join('/');
+interface ScopeSignals {
+   path: string;
+   signals: string[];
+   score: number;
 }
 
-function rel(root, absolutePath) {
-   return toPosix(path.relative(root, absolutePath));
+interface MetricResult {
+   score: number;
+   confidence: string;
+   evidence: string[];
+   gaps: string;
+   next_step: string;
 }
 
-function escapeRegex(value) {
-   return value.replace(/[|\\{}()[\]^$+?.]/gu, '\\$&');
+interface RepoContext {
+   root: string;
+   files: string[];
+   relpaths: Set<string>;
+   doc_paths: string[];
+   doc_texts: Record<string, string>;
+   task_surface: Set<string>;
+   task_surface_files: Set<string>;
+   entrypoint_files: string[];
 }
 
-function globToRegExp(pattern) {
-   let result = '';
-
-   for (let index = 0; index < pattern.length; index += 1) {
-      const char = pattern[index];
-      const next = pattern[index + 1];
-
-      if (char === '*' && next === '*') {
-         result += '.*';
-         index += 1;
-      } else if (char === '*') {
-         result += '[^/]*';
-      } else if (char === '?') {
-         result += '.';
-      } else {
-         result += escapeRegex(char);
-      }
-   }
-
-   return new RegExp(`^${result}$`, 'u');
+export interface ScoreReport {
+   repo: string;
+   evaluated_scope: string;
+   evaluated_root: string;
+   discovered_scopes: ScopeSignals[];
+   scope_selection: string;
+   selected_metrics: string[];
+   available_metrics: string[];
+   score: number;
+   max_score: number;
+   score_percentage: number;
+   metrics: Record<string, MetricResult>;
+   notes: string[];
+   quick_wins: string[];
 }
 
-function matchesExclude(relpath, patterns) {
-   if (patterns.length === 0) {
-      return false;
-   }
-
-   return patterns.some((pattern) => {
-      const trimmed = pattern.replace(/\/+$/gu, '');
-
-      if (relpath === pattern || relpath.startsWith(`${trimmed}/`)) {
-         return true;
-      }
-
-      return globToRegExp(pattern).test(relpath);
-   });
-}
-
-async function readText(filePath) {
-   try {
-      const stat = await fs.stat(filePath);
-
-      if (stat.size > MAX_TEXT_SIZE) {
-         return '';
-      }
-
-      return await fs.readFile(filePath, 'utf8');
-   } catch (_error) {
-      return '';
-   }
-}
-
-async function isDirectory(targetPath) {
-   try {
-      return (await fs.stat(targetPath)).isDirectory();
-   } catch (_error) {
-      return false;
-   }
-}
-
-async function readDirEntries(targetPath) {
-   try {
-      return await fs.readdir(targetPath, { withFileTypes: true });
-   } catch (_error) {
-      return [];
-   }
-}
-
-async function walkRepo(root, excludes) {
-   const excludePatterns = excludes
-      .map((pattern) => pattern.trim().replace(/^\/+|\/+$/gu, ''))
-      .filter(Boolean);
-   const stack = [ root ];
-   const results = [];
-
-   while (stack.length > 0) {
-      const current = stack.pop();
-
-      if (!current) {
-         continue;
-      }
-
-      const entries = await readDirEntries(current);
-
-      for (const entry of entries) {
-         const absolutePath = path.join(current, entry.name);
-         const relpath = rel(root, absolutePath);
-
-         if (matchesExclude(relpath, excludePatterns)) {
-            continue;
-         }
-
-         if (entry.isDirectory()) {
-            if (!IGNORED_DIRS.has(entry.name)) {
-               stack.push(absolutePath);
-            }
-         } else {
-            results.push(relpath);
-         }
-      }
-   }
-
-   return results;
-}
-
-function findFiles(paths, ...patterns) {
-   return paths.filter((relpath) => {
-      const basename = path.posix.basename(relpath);
-
-      return patterns.some((pattern) => {
-         const matcher = globToRegExp(pattern);
-
-         return matcher.test(basename) || matcher.test(relpath);
-      });
-   });
-}
-
-async function readCandidates(paths, root, patterns) {
-   const selected = {};
-
-   for (const relpath of findFiles(paths, ...patterns)) {
-      selected[relpath] = await readText(path.join(root, relpath));
-   }
-
-   return selected;
-}
-
-function parsePackageScripts(text) {
-   try {
-      const parsed = JSON.parse(text);
-      const scripts = parsed.scripts;
-
-      if (!scripts || typeof scripts !== 'object' || Array.isArray(scripts)) {
-         return new Set();
-      }
-
-      return new Set(Object.keys(scripts).map((name) => String(name).trim()));
-   } catch (_error) {
-      return new Set();
-   }
-}
-
-function parseMakeTargets(text) {
-   const targets = new Set();
-
-   for (const line of text.split(/\r?\n/u)) {
-      if (line.startsWith('\t') || line.startsWith(' ')) {
-         continue;
-      }
-
-      const match = line.match(/^([A-Za-z0-9_.-]+):(?:\s|$)/u);
-
-      if (match && !match[1].startsWith('.')) {
-         targets.add(match[1]);
-      }
-   }
-
-   return targets;
-}
-
-function parseJustTargets(text) {
-   const targets = new Set();
-
-   for (const line of text.split(/\r?\n/u)) {
-      const match = line.match(/^([A-Za-z0-9_.-]+):(?:\s|$)/u);
-
-      if (match) {
-         targets.add(match[1]);
-      }
-   }
-
-   return targets;
-}
-
-function parseTaskfileTargets(text) {
-   const targets = new Set();
-   let inTasks = false;
-
-   for (const line of text.split(/\r?\n/u)) {
-      if (/^tasks:\s*$/u.test(line)) {
-         inTasks = true;
-         continue;
-      }
-
-      if (inTasks && /^[A-Za-z]/u.test(line)) {
-         break;
-      }
-
-      if (!inTasks) {
-         continue;
-      }
-
-      const match = line.match(/^\s{2,}([A-Za-z0-9_.-]+):\s*$/u);
-
-      if (match) {
-         targets.add(match[1]);
-      }
-   }
-
-   return targets;
-}
-
-function parseCargoAliases(text) {
-   const targets = new Set();
-   let inAlias = false;
-
-   for (const line of text.split(/\r?\n/u)) {
-      const stripped = line.trim();
-
-      if (!stripped || stripped.startsWith('#')) {
-         continue;
-      }
-
-      if (/^\[[^\]]+\]\s*$/u.test(stripped)) {
-         inAlias = stripped.toLowerCase() === '[alias]';
-         continue;
-      }
-
-      if (!inAlias) {
-         continue;
-      }
-
-      const match = stripped.match(/^([A-Za-z0-9_.:-]+)\s*=/u);
-
-      if (match) {
-         targets.add(match[1]);
-      }
-   }
-
-   return targets;
-}
-
-function normalizeScope(root, scope) {
+function normalizeScope(root: string, scope: string): string {
    const scopePath = path.resolve(root, scope);
    const relative = path.relative(root, scopePath);
 
@@ -347,15 +112,15 @@ function normalizeScope(root, scope) {
    return normalized || ROOT_SCOPE;
 }
 
-function rootRoutesToScope(rootReadme, scope) {
+function rootRoutesToScope(rootReadme: string, scope: string): boolean {
    return rootReadme.includes(`${scope}/`)
       || rootReadme.includes(`\`${scope}\``)
       || rootReadme.includes(`cd ${scope}`);
 }
 
-function clipEvidence(items, limit = MAX_EVIDENCE) {
-   const seen = new Set();
-   const unique = [];
+function clipEvidence(items: string[], limit = MAX_EVIDENCE): string[] {
+   const seen = new Set<string>();
+   const unique: string[] = [];
 
    for (const item of items) {
       if (!seen.has(item)) {
@@ -367,7 +132,7 @@ function clipEvidence(items, limit = MAX_EVIDENCE) {
    return unique.slice(0, limit);
 }
 
-function metric(score, confidence, evidence, gaps, nextStep) {
+function metric(score: number, confidence: string, evidence: string[], gaps: string, nextStep: string): MetricResult {
    return {
       score,
       confidence,
@@ -377,45 +142,31 @@ function metric(score, confidence, evidence, gaps, nextStep) {
    };
 }
 
-function setDefault(map, key) {
+function setDefault(map: Map<string, Set<string>>, key: string): Set<string> {
    if (!map.has(key)) {
       map.set(key, new Set());
    }
 
-   return map.get(key);
+   return map.get(key)!;
 }
 
-function hasSignal(signals, prefix) {
+function hasSignal(signals: Set<string>, prefix: string): boolean {
    return Array.from(signals).some((signal) => signal.startsWith(prefix));
 }
 
-function scoreScopeSignals(signals) {
+function scoreScopeSignals(signals: Set<string>): number {
    let score = 0;
 
-   if (hasSignal(signals, 'agent_doc:')) {
-      score += 4;
-   }
-
-   if (hasSignal(signals, 'task_surface:')) {
-      score += 2;
-   }
-
-   if (hasSignal(signals, 'manifest:')) {
-      score += 2;
-   }
-
-   if (hasSignal(signals, 'scope_readme:')) {
-      score += 1;
-   }
-
-   if (hasSignal(signals, 'root_routes_here:')) {
-      score += 1;
-   }
+   if (hasSignal(signals, 'agent_doc:')) score += 4;
+   if (hasSignal(signals, 'task_surface:')) score += 2;
+   if (hasSignal(signals, 'manifest:')) score += 2;
+   if (hasSignal(signals, 'scope_readme:')) score += 1;
+   if (hasSignal(signals, 'root_routes_here:')) score += 1;
 
    return score;
 }
 
-function isLikelyNestedUtilityScope(scope, signals) {
+function isLikelyNestedUtilityScope(scope: string, signals: Set<string>): boolean {
    if (hasSignal(signals, 'agent_doc:') || hasSignal(signals, 'root_routes_here:')) {
       return false;
    }
@@ -431,13 +182,13 @@ function isLikelyNestedUtilityScope(scope, signals) {
    });
 }
 
-async function collectContext(root, excludes) {
+async function collectContext(root: string, excludes: string[]): Promise<RepoContext> {
    const files = await walkRepo(root, excludes);
    const relpaths = new Set(files);
    const docs = files.filter((filePath) => {
       return DOC_EXTENSIONS.has(path.extname(filePath).toLowerCase());
    });
-   const docTexts = {};
+   const docTexts: Record<string, string> = {};
 
    for (const relpath of docs) {
       const basename = path.posix.basename(relpath).toLowerCase();
@@ -447,59 +198,7 @@ async function collectContext(root, excludes) {
       }
    }
 
-   const taskFiles = await readCandidates(files, root, TASK_FILE_PATTERNS);
-   const taskSurface = new Set();
-   const taskSurfaceFiles = new Set();
-   const entrypointFiles = [];
-
-   for (const [ relpath, text ] of Object.entries(taskFiles)) {
-      entrypointFiles.push(relpath);
-
-      const lower = relpath.toLowerCase();
-
-      if (lower.endsWith('package.json')) {
-         const scripts = parsePackageScripts(text);
-
-         for (const script of scripts) {
-            taskSurface.add(script);
-         }
-
-         if (scripts.size > 0) {
-            taskSurfaceFiles.add(relpath);
-         }
-      } else if (lower.endsWith('makefile')) {
-         const targets = parseMakeTargets(text);
-         taskSurfaceFiles.add(relpath);
-
-         for (const target of targets) {
-            taskSurface.add(target);
-         }
-      } else if (lower.endsWith('justfile')) {
-         const targets = parseJustTargets(text);
-         taskSurfaceFiles.add(relpath);
-
-         for (const target of targets) {
-            taskSurface.add(target);
-         }
-      } else if (lower.endsWith('.cargo/config.toml') || lower.endsWith('.cargo/config')) {
-         const aliases = parseCargoAliases(text);
-
-         for (const alias of aliases) {
-            taskSurface.add(alias);
-         }
-
-         if (aliases.size > 0) {
-            taskSurfaceFiles.add(relpath);
-         }
-      } else if (lower.endsWith('.yml') || lower.endsWith('.yaml')) {
-         const targets = parseTaskfileTargets(text);
-         taskSurfaceFiles.add(relpath);
-
-         for (const target of targets) {
-            taskSurface.add(target);
-         }
-      }
-   }
+   const surface = await collectAllTaskSurfaces(root, files);
 
    return {
       root,
@@ -507,113 +206,21 @@ async function collectContext(root, excludes) {
       relpaths,
       doc_paths: docs,
       doc_texts: docTexts,
-      task_surface: taskSurface,
-      task_surface_files: taskSurfaceFiles,
-      entrypoint_files: entrypointFiles,
+      task_surface: surface.task_surface,
+      task_surface_files: surface.task_surface_files,
+      entrypoint_files: surface.entrypoint_files,
    };
 }
 
-function categorizeTaskSurface(taskSurface) {
-   const categories = new Map();
-
-   function add(category, name) {
-      if (!categories.has(category)) {
-         categories.set(category, new Set());
-      }
-
-      categories.get(category).add(name);
-   }
-
-   for (const name of Array.from(taskSurface).sort()) {
-      const lower = name.toLowerCase();
-
-      if ([ 'setup', 'bootstrap', 'install', 'init' ].includes(lower)
-         || /^(setup|bootstrap|install|init):/u.test(lower)) {
-         add('setup', name);
-      }
-
-      if ([ 'dev', 'start', 'serve', 'tauri' ].includes(lower)
-         || /^(dev|start|serve):/u.test(lower)) {
-         add('dev', name);
-      }
-
-      if (lower === 'build' || /^(build|bundle|compile|package):/u.test(lower)) {
-         add('build', name);
-      }
-
-      if (lower === 'test'
-         || lower.startsWith('test:')
-         || [ 'integration', 'e2e', 'smoke' ].includes(lower)
-         || /^(integration|e2e|smoke):/u.test(lower)) {
-         add('test', name);
-      }
-
-      if ([ 'ci', 'check' ].includes(lower) || /^(ci|check):/u.test(lower)) {
-         add('check', name);
-      }
-
-      if ([ 'typecheck', 'type-check' ].includes(lower)
-         || /^(typecheck|type-check):/u.test(lower)) {
-         add('check', name);
-      }
-
-      if (lower === 'standards' || lower.startsWith('standards:')) {
-         add('lint', name);
-         add('check', name);
-      }
-
-      if (lower === 'lint'
-         || lower.startsWith('lint:')
-         || lower.endsWith(':lint')
-         || lower.includes(':lint:')) {
-         add('lint', name);
-      }
-
-      if ([ 'eslint', 'stylelint', 'markdownlint', 'commitlint', 'rust:lint' ].includes(lower)) {
-         add('lint', name);
-      }
-
-      if (/^(eslint|stylelint|markdownlint|commitlint|rust:lint):/u.test(lower)) {
-         add('lint', name);
-      }
-
-      if (/^(lint[-_])/u.test(lower) || lower.includes('clippy')) {
-         add('lint', name);
-      }
-
-      if (/(^|[:_-])fmt($|[:_-])/u.test(lower)) {
-         if (lower.includes('fix') || /^(fix[-_])/u.test(lower)) {
-            add('format', name);
-         } else {
-            add('lint', name);
-         }
-      }
-
-      if ([ 'format', 'fmt' ].includes(lower) || /^(format|fmt):/u.test(lower)) {
-         add('format', name);
-      }
-
-      if (lower.endsWith(':fix') || lower.includes(':fix:') || /^(fix[-_])/u.test(lower)) {
-         add('format', name);
-      }
-   }
-
-   return Object.fromEntries(Array.from(categories.entries(), ([ category, names ]) => {
-      return [ category, Array.from(names).sort() ];
-   }));
-}
-
-function discoverScopes(ctx) {
+function discoverScopes(ctx: RepoContext): ScopeSignals[] {
    const relpaths = Array.from(ctx.relpaths).sort();
    const rootReadme = (ctx.doc_texts['README.md'] || ctx.doc_texts['README.mdx'] || '').toLowerCase();
-   const signalsByScope = new Map();
+   const signalsByScope = new Map<string, Set<string>>();
 
    for (const relpath of relpaths) {
       const parts = relpath.split('/');
 
-      if (parts.length < 2) {
-         continue;
-      }
+      if (parts.length < 2) continue;
 
       const directScope = parts.slice(0, -1).join('/');
       const filename = parts[parts.length - 1].toLowerCase();
@@ -628,7 +235,7 @@ function discoverScopes(ctx) {
 
       const signals = setDefault(signalsByScope, directScope);
 
-      if (TASK_FILE_NAMES.has(filename) && ctx.task_surface_files.has(relpath)) {
+      if (ctx.task_surface_files.has(relpath)) {
          signals.add(`task_surface:${parts[parts.length - 1]}`);
       }
 
@@ -641,7 +248,7 @@ function discoverScopes(ctx) {
       }
    }
 
-   const candidates = [];
+   const candidates: ScopeSignals[] = [];
 
    for (const [ scope, signals ] of signalsByScope.entries()) {
       const score = scoreScopeSignals(signals);
@@ -659,7 +266,10 @@ function discoverScopes(ctx) {
    });
 }
 
-function chooseScope(ctx, explicitScope = undefined) {
+function chooseScope(
+   ctx: RepoContext,
+   explicitScope: string | undefined = undefined,
+): [ string, ScopeSignals[], string ] {
    const discovered = discoverScopes(ctx);
 
    if (explicitScope) {
@@ -682,7 +292,7 @@ function chooseScope(ctx, explicitScope = undefined) {
    return [ ROOT_SCOPE, discovered, 'root_default' ];
 }
 
-async function scoreBootstrap(ctx) {
+async function scoreBootstrap(ctx: RepoContext): Promise<MetricResult> {
    const taskCategories = categorizeTaskSurface(ctx.task_surface);
    const declarative = Array.from(ctx.relpaths)
       .filter((relpath) => {
@@ -757,7 +367,7 @@ async function scoreBootstrap(ctx) {
    return metric(0, 'high', evidence, 'No strong repo-visible bootstrap path was found.', 'Declare the toolchain and local services in version control and expose a `setup` task.');
 }
 
-async function scoreTaskEntrypoints(ctx) {
+async function scoreTaskEntrypoints(ctx: RepoContext): Promise<MetricResult> {
    const taskCategories = categorizeTaskSurface(ctx.task_surface);
    const matchedCategories = [ 'setup', 'dev', 'build', 'test', 'lint', 'format', 'check' ].filter((category) => {
       return (taskCategories[category] || []).length > 0;
@@ -787,7 +397,7 @@ async function scoreTaskEntrypoints(ctx) {
    return metric(0, 'high', evidence, 'No canonical task surface was detected.', 'Add repo-level entrypoints for setup, validation, and build tasks.');
 }
 
-async function scoreValidationHarness(ctx) {
+async function scoreValidationHarness(ctx: RepoContext): Promise<MetricResult> {
    const taskCategories = categorizeTaskSurface(ctx.task_surface);
    const testDirs = Array.from(ctx.relpaths)
       .filter((relpath) => {
@@ -837,7 +447,7 @@ async function scoreValidationHarness(ctx) {
    return metric(0, 'high', evidence, 'No meaningful local validation harness was detected.', 'Add a basic test or smoke-test path that an agent can run after changes.');
 }
 
-async function scoreLintFormat(ctx) {
+async function scoreLintFormat(ctx: RepoContext): Promise<MetricResult> {
    const taskCategories = categorizeTaskSurface(ctx.task_surface);
    const lintFiles = Array.from(ctx.relpaths)
       .filter((relpath) => {
@@ -899,7 +509,7 @@ async function scoreLintFormat(ctx) {
       }
    }
 
-   const extra = [];
+   const extra: string[] = [];
 
    if (ctx.relpaths.has('.pre-commit-config.yaml') || ctx.relpaths.has('.pre-commit-config.yml')) {
       extra.push('.pre-commit-config.yaml');
@@ -943,7 +553,62 @@ async function scoreLintFormat(ctx) {
    return metric(0, 'high', evidence, 'No lint or format gates were detected.', 'Add at least one linter and formatter with explicit repo-level commands.');
 }
 
-async function scoreAgentRepoMap(ctx) {
+async function scoreGuardrailsAndHooks(ctx: RepoContext): Promise<MetricResult> {
+   const families: Record<string, string[]> = {
+      'pre-commit': [],
+      lefthook: [],
+      'husky/githooks': [],
+      'agent-hooks': [],
+   };
+
+   for (const relpath of ctx.relpaths) {
+      if (relpath === '.pre-commit-config.yaml' || relpath === '.pre-commit-config.yml') {
+         families['pre-commit'].push(relpath);
+      }
+      if (relpath === 'lefthook.yml' || relpath === 'lefthook.yaml' || relpath === '.lefthook.yml') {
+         families.lefthook.push(relpath);
+      }
+      if (relpath.startsWith('.husky/') || relpath.startsWith('.githooks/')) {
+         families['husky/githooks'].push(relpath);
+      }
+      if (relpath.startsWith('.claude/hooks/')) {
+         families['agent-hooks'].push(relpath);
+      }
+   }
+
+   const presentFamilies = Object.entries(families).filter(([ , files ]) => files.length > 0);
+   const evidence = presentFamilies.flatMap(([ , files ]) => files).slice(0, MAX_EVIDENCE);
+
+   if (presentFamilies.length >= 2) {
+      return metric(
+         3,
+         'high',
+         evidence,
+         'The repository looks like it has layered mechanical enforcement.',
+         'Keep hook configs healthy and audit them when adding new tools.',
+      );
+   }
+
+   if (presentFamilies.length === 1) {
+      return metric(
+         2,
+         'high',
+         evidence,
+         'A single hooks family enforces guardrails; consider adding another for redundancy.',
+         'Add another layer such as `.pre-commit-config.yaml` or `lefthook.yml` so guardrails survive a missing local install.',
+      );
+   }
+
+   return metric(
+      0,
+      'high',
+      evidence,
+      'No mechanical hooks found.',
+      'Add `pre-commit`, `lefthook`, `husky`, or `.claude/hooks/` so common mistakes fail loudly before commit.',
+   );
+}
+
+async function scoreAgentRepoMap(ctx: RepoContext): Promise<MetricResult> {
    const repoWideAgentDocs = Array.from(ROOT_AGENT_DOC_PATHS)
       .filter((candidate) => ctx.relpaths.has(candidate))
       .sort();
@@ -965,15 +630,16 @@ async function scoreAgentRepoMap(ctx) {
       if (ctx.doc_texts[candidate]) {
          mapText = ctx.doc_texts[candidate];
 
-         if (mapText) {
-            break;
-         }
+         if (mapText) break;
       }
    }
 
-   const cues = [ 'command', 'setup', 'docs', 'architecture', 'test', 'constraint', 'workflow' ]
+   const cueMatches = [ 'command', 'setup', 'docs', 'architecture', 'test', 'constraint', 'workflow' ]
       .filter((token) => mapText.toLowerCase().includes(token))
       .length;
+   const repoMapBonus = [ 'docs/repo-map.md', 'docs/architecture.md', 'ARCHITECTURE.md' ]
+      .some((candidate) => ctx.relpaths.has(candidate)) ? 1 : 0;
+   const cues = cueMatches + repoMapBonus;
    const hasAgentDoc = repoWideAgentDocs.length > 0;
    const hasNestedAgentDoc = nestedAgentDocs.length > 0;
    const rootText = ROOT_MAP_DOCS
@@ -1012,7 +678,7 @@ async function scoreAgentRepoMap(ctx) {
    return metric(0, 'high', evidence, 'No obvious repo map or contributor guide was detected.', 'Add `AGENTS.md` with the primary commands, docs, and navigation tips.');
 }
 
-async function scoreStructuredDocs(ctx) {
+async function scoreStructuredDocs(ctx: RepoContext): Promise<MetricResult> {
    const docCount = ctx.doc_paths.length;
    const docsDirFiles = [ ...ctx.doc_paths ]
       .filter((relpath) => relpath.startsWith('docs/'))
@@ -1062,14 +728,14 @@ async function scoreStructuredDocs(ctx) {
    return metric(0, 'high', evidence, 'Very little structured documentation was found.', 'Add a `docs/` directory with an index page and a small set of core topics.');
 }
 
-function isDecisionRecordPath(relpath) {
+function isDecisionRecordPath(relpath: string): boolean {
    const lower = relpath.toLowerCase();
 
    return /(^|\/)(adr|adrs|decisions?)(\/|[-_])/u.test(lower)
       && /\.(md|mdx)$/u.test(lower);
 }
 
-function isCanonicalDecisionRecordPath(relpath) {
+function isCanonicalDecisionRecordPath(relpath: string): boolean {
    const lower = relpath.toLowerCase();
 
    return lower.startsWith('docs/adr/')
@@ -1077,7 +743,7 @@ function isCanonicalDecisionRecordPath(relpath) {
       || lower.startsWith('docs/decisions/');
 }
 
-async function scoreDecisionRecords(ctx) {
+async function scoreDecisionRecords(ctx: RepoContext): Promise<MetricResult> {
    const adrFiles = Array.from(ctx.relpaths)
       .filter((relpath) => {
          return isDecisionRecordPath(relpath);
@@ -1121,17 +787,18 @@ async function scoreDecisionRecords(ctx) {
    return metric(0, 'high', adrFiles, 'No decision-record artifacts were detected.', 'Start recording major architecture and workflow decisions in ADRs.');
 }
 
-const METRIC_SCORERS = {
+const METRIC_SCORERS: Record<MetricName, (ctx: RepoContext) => Promise<MetricResult>> = {
    bootstrap_self_sufficiency: scoreBootstrap,
    task_entrypoints: scoreTaskEntrypoints,
    validation_harness: scoreValidationHarness,
    lint_format_gates: scoreLintFormat,
+   guardrails_and_hooks: scoreGuardrailsAndHooks,
    agent_repo_map: scoreAgentRepoMap,
    structured_docs: scoreStructuredDocs,
    decision_records: scoreDecisionRecords,
 };
 
-function summarize(report) {
+function summarize(report: ScoreReport): void {
    const priorities = Object.entries(report.metrics)
       .sort((left, right) => (left[1].score - right[1].score) || left[0].localeCompare(right[0]));
 
@@ -1140,29 +807,27 @@ function summarize(report) {
    });
 }
 
-function normalizeMetricNames(rawMetrics) {
+function normalizeMetricNames(rawMetrics: string[]): MetricName[] {
    if (rawMetrics.length === 0) {
       return [ ...METRIC_NAMES ];
    }
 
-   const names = [];
-   const seen = new Set();
+   const names: MetricName[] = [];
+   const seen = new Set<string>();
 
    for (const item of rawMetrics) {
       for (const token of item.split(',')) {
          const name = token.trim();
 
-         if (!name) {
-            continue;
-         }
+         if (!name) continue;
 
-         if (!METRIC_NAMES.includes(name)) {
+         if (!(METRIC_NAMES as readonly string[]).includes(name)) {
             throw new Error(`Unknown metric '${name}'. Valid metrics: ${METRIC_NAMES.join(', ')}`);
          }
 
          if (!seen.has(name)) {
             seen.add(name);
-            names.push(name);
+            names.push(name as MetricName);
          }
       }
    }
@@ -1170,13 +835,18 @@ function normalizeMetricNames(rawMetrics) {
    return names;
 }
 
-async function buildReport(root, excludes, selectedMetrics, scope) {
+export async function buildReport(
+   root: string,
+   excludes: string[],
+   selectedMetrics: MetricName[],
+   scope: string | undefined,
+): Promise<ScoreReport> {
    const rootContext = await collectContext(root, excludes);
    const normalizedScope = scope ? normalizeScope(root, scope) : undefined;
    const [ evaluatedScope, discoveredScopes, scopeSelection ] = chooseScope(rootContext, normalizedScope);
    const targetRoot = evaluatedScope === ROOT_SCOPE ? root : path.resolve(root, evaluatedScope);
-   const context = await collectContext(targetRoot, excludes);
-   const metrics = {};
+   const context = targetRoot === root ? rootContext : await collectContext(targetRoot, excludes);
+   const metrics: Record<string, MetricResult> = {};
 
    for (const metricName of selectedMetrics) {
       metrics[metricName] = await METRIC_SCORERS[metricName](context);
@@ -1185,7 +855,7 @@ async function buildReport(root, excludes, selectedMetrics, scope) {
    const score = Object.values(metrics).reduce((total, data) => total + data.score, 0);
    const maxScore = selectedMetrics.length * 3;
    const scorePercentage = maxScore === 0 ? 0 : Math.round((score / maxScore) * 100);
-   const report = {
+   const report: ScoreReport = {
       repo: root,
       evaluated_scope: evaluatedScope,
       evaluated_root: targetRoot,
@@ -1210,7 +880,7 @@ async function buildReport(root, excludes, selectedMetrics, scope) {
    return report;
 }
 
-function toMarkdown(report) {
+export function toMarkdown(report: ScoreReport): string {
    const lines = [
       '# Agentic Legibility Scorecard',
       '',
@@ -1266,8 +936,18 @@ function toMarkdown(report) {
    return lines.join('\n');
 }
 
-function parseCliArgs(argv) {
-   const args = {
+export interface CliArgs {
+   repo: string;
+   format: 'json' | 'markdown';
+   metrics: string[];
+   listMetrics: boolean;
+   listScopes: boolean;
+   scope: string | undefined;
+   excludes: string[];
+}
+
+export function parseCliArgs(argv: string[]): CliArgs {
+   const args: CliArgs = {
       repo: '.',
       format: 'json',
       metrics: [],
@@ -1276,7 +956,7 @@ function parseCliArgs(argv) {
       scope: undefined,
       excludes: [],
    };
-   const positionals = [];
+   const positionals: string[] = [];
 
    for (let index = 0; index < argv.length; index += 1) {
       const arg = argv[index];
@@ -1293,9 +973,7 @@ function parseCliArgs(argv) {
       } else if (arg === '--metric') {
          const value = argv[index + 1];
 
-         if (!value) {
-            throw new Error('--metric requires a value');
-         }
+         if (!value) throw new Error('--metric requires a value');
 
          args.metrics.push(value);
          index += 1;
@@ -1306,18 +984,14 @@ function parseCliArgs(argv) {
       } else if (arg === '--scope') {
          const value = argv[index + 1];
 
-         if (!value) {
-            throw new Error('--scope requires a value');
-         }
+         if (!value) throw new Error('--scope requires a value');
 
          args.scope = value;
          index += 1;
       } else if (arg === '--exclude') {
          const value = argv[index + 1];
 
-         if (!value) {
-            throw new Error('--exclude requires a value');
-         }
+         if (!value) throw new Error('--exclude requires a value');
 
          args.excludes.push(value);
          index += 1;
@@ -1339,8 +1013,10 @@ function parseCliArgs(argv) {
    return args;
 }
 
-async function main() {
-   const args = parseCliArgs(process.argv.slice(2));
+export { collectContext, discoverScopes, normalizeMetricNames, METRIC_NAMES };
+
+export async function runCli(argv: string[] = process.argv.slice(2)): Promise<void> {
+   const args = parseCliArgs(argv);
 
    if (args.listMetrics) {
       process.stdout.write(`${METRIC_NAMES.join('\n')}\n`);
@@ -1376,12 +1052,4 @@ async function main() {
    } else {
       process.stdout.write(`${toMarkdown(report)}\n`);
    }
-}
-
-try {
-   await main();
-} catch (error) {
-   const message = error instanceof Error ? error.message : String(error);
-   process.stderr.write(`${message}\n`);
-   process.exitCode = 1;
 }

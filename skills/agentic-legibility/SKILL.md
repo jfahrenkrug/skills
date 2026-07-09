@@ -1,132 +1,89 @@
 ---
 name: agentic-legibility
-description: Audit and improve a repository's agentic legibility — the docs, entrypoints, and structure that let coding agents bootstrap, navigate, validate, and work without tribal knowledge. Covers AGENTS.md, docs/, ExecPlans, and scoring.
+description: Use when the user asks to improve a repository's agentic legibility, set up AGENTS.md or CLAUDE.md, make a repo agent-friendly, score or re-score a repo, garden stale docs, or update agent-facing documentation after architectural changes — even if they don't say "agentic legibility" by name. Trigger on phrases like "score this repo", "the architecture changed, update AGENTS.md", "set up docs for agents", "check if the docs are still current", "add an ExecPlan", or any request to make a codebase workable for fresh coding agents without tribal knowledge. Covers AGENTS.md/CLAUDE.md, docs/ structure, ExecPlans, decision records, and mechanical audit checks.
+compatibility: Requires Node.js 20+
 metadata:
   author: Johannes Fahrenkrug (https://springenwerk.com)
-allowed-tools: Bash(node ${CLAUDE_SKILL_DIR}/scripts/score_repo.js:*) Read Write Edit Glob Grep
+  version: "0.2.0"
+allowed-tools: Bash(node ${CLAUDE_SKILL_DIR}/scripts/legibility.js:*) Read Write Edit Glob Grep
 ---
 
 # Agentic Legibility
 
 ## Overview
 
-Make the repository itself the system of record for how work gets done. The goal is not more documentation. The goal is a repo that tells an agent where to start, what boundaries matter, how to run and validate the system, where decisions live, and how to continue work without tribal knowledge.
+Make the repository itself the system of record for how work gets done. The goal is not more documentation. The goal is a repo that tells an agent where to start, what boundaries matter, how to run and validate the system, where decisions live, and how to continue work without tribal knowledge. When the skill has been applied, a fresh agent can answer all of that from the repo alone.
 
 Treat `AGENTS.md` as a concise table of contents, not a monolith. Push durable knowledge into indexed repo files and short docs that route the reader deeper only when needed.
 
-## Outcomes
-
-After applying this skill, an agent should be able to answer these questions from the repo alone:
-
-- Where do I start for this task?
-- Which commands are canonical for setup, development, testing, linting, and building?
-- What are the major modules or domains, and which dependency directions are allowed?
-- Where do implementation plans live, and how are they maintained while work is in progress?
-- Where are important technical decisions recorded?
-- How do I validate ordinary changes locally?
-- Which docs are authoritative for onboarding, architecture, and active work?
-
 ## Core Rules
 
-- Prefer short index documents over long root-level manuals.
+- Prefer short index documents over long root-level manuals; route from general to specific.
 - Keep durable knowledge in version control, not in chat, heads, or external docs.
-- Route from general to specific: root map, then domain guide, then implementation detail.
 - Expose one canonical command path for common tasks.
 - Name architecture boundaries explicitly and describe allowed dependency direction.
 - Treat plans, onboarding docs, and decision records as part of the product surface for agents.
-- Prefer mechanical enforcement over “please remember” guidance. When an agent keeps making the same mistake, the fix is a lint rule or structural test, not more prose.
+- Prefer mechanical enforcement over "please remember" guidance: when an agent keeps making the same mistake, the fix is a lint rule or structural test, not more prose.
 - Keep documentation fresh with repo-local checks, cross-links, and maintenance workflows.
-- Make diagnostics legible: logs, metrics, traces, screenshots, or repro steps should be reachable through documented local workflows where possible.
+- Make diagnostics legible: logs, metrics, traces, or repro steps should be reachable through documented local workflows.
 - Every file added for legibility must help both a new human and a coding agent.
 
 ## Workflows
 
-Choose the workflow that matches the current need:
-
 - **Initial setup** — auditing a repo and creating legibility infrastructure from scratch. See [setup.md](setup.md).
   Use when the user asks to: "improve this repo's agentic legibility", "set up agentic legibility", "add AGENTS.md", "make this repo agent-friendly", "set up docs for agents", or "score this repo" and no legibility infrastructure exists yet.
-  Initial setup is needed when any or all of the following artifacts are missing:
-  - AGENTS.md
-  - .agents/
-  - .agents/PLANS.md
-  - docs/
-  - docs/exec-plans/
 
 - **Maintenance** — keeping existing legibility artifacts current as the code evolves, re-scoring, and doc gardening. See [maintain.md](maintain.md).
-  Use when the user asks to: "update the agent docs", "update agentic legibility", "re-score the repo", "the architecture changed, update AGENTS.md", "garden the docs", or "check if the docs are still current".
+  Use when the user asks to: "update the agent docs", "re-score the repo", "the architecture changed, update AGENTS.md", "garden the docs", or "check if the docs are still current".
 
 ## Workflow Selection
 
-Choose the workflow using this precedence order:
+Run the artifacts audit first and let its output gate the workflow:
 
-1. Run **Initial setup** if any required legibility artifact is missing.
-2. Run **Maintenance** only if all required legibility artifacts already exist.
+```
+node scripts/legibility.js audit --check-artifacts /path/to/repo
+```
 
-Treat this as a hard gate. Do not choose Maintenance just because the repository has partial legibility infrastructure.
+The check returns `status: ok` or `status: drift` with one finding per missing required artifact (`AGENTS.md`, `CLAUDE.md`, `.agents/`, `.agents/PLANS.md`, `docs/`, `docs/exec-plans/` with `active/` and `completed/`). Apply this precedence:
 
-The required artifacts are:
+1. If `status` is `drift` (any required artifact is missing), run **Initial setup**.
+2. If `status` is `ok` (every required artifact exists), run **Maintenance**.
 
-- `AGENTS.md`
-- `.agents/`
-- `.agents/PLANS.md`
-- `docs/`
-- `docs/exec-plans/`
+Treat this as a hard gate. Do not infer Maintenance from partial infrastructure such as an existing `AGENTS.md`, `docs/`, or near-miss structures like `.agent/` — custom or legacy layouts do not satisfy the check unless they contain the exact required paths, or the user explicitly asks to preserve an alternative convention. Near-miss structures are migration work under **Initial setup**.
 
-If even one item in that list is missing, the task is **Initial setup**.
+## Reference Files
 
-## First Step
+Both workflows use the same scoring tool and reference materials. Load each file only when the condition applies:
 
-Before choosing a workflow, list the required artifact paths and mark each one as present or missing in your notes. Base workflow selection on that checklist, not on overall impression.
+- [PLANS.md](PLANS.md) — load when authoring, reviewing, or validating an ExecPlan; contains the section-by-section specification.
+- [references/scorecard-and-guidance.md](references/scorecard-and-guidance.md) — load when applying the eight-dimension scorecard, interpreting a score report, or explaining a recommendation to the user.
+- [references/execplans.md](references/execplans.md) — load when deciding where ExecPlans live in the repo, how they move between `active/` and `completed/`, or how they are indexed.
+- [references/audit-checks.md](references/audit-checks.md) — load when you need the full list of `--check-*` flags, the finding schema, severities, or remediation families.
 
-## Common Misclassification To Avoid
+## Mechanical Audit Loop
 
-Do not infer **Maintenance** from partial infrastructure such as an existing `AGENTS.md`, `docs/`, or custom agent-support folders like `.agent/`.
+`scripts/legibility.js` is the unified dispatcher. Paths in the commands below are relative to the skill directory; the agent resolves them automatically.
 
-Custom or legacy structures do not satisfy the required-artifact check unless they include the exact required paths above, or the user explicitly asks to preserve an alternative convention.
+Scoring (eight-dimension scorecard — bootstrap, task entrypoints, validation, lint, guardrails and hooks, repo map, structured docs, decisions):
 
-When the repository contains a near-miss structure such as `.agent/` instead of `.agents/PLANS.md`, treat that as evidence for migration or integration work under **Initial setup**, not as justification for **Maintenance**.
+- `node scripts/legibility.js score /path/to/repo`
+- `node scripts/legibility.js list-scopes /path/to/repo`
+- `node scripts/legibility.js list-metrics`
 
-Both workflows use the same scoring tool and reference materials:
+Audit (deterministic, language-agnostic checks that return findings with `severity`, `path`, `line`, `message`, `remediation`):
 
-- ExecPlans specification: [PLANS.md](PLANS.md)
-- Scorecard rubric and recommendations: [references/scorecard-and-guidance.md](references/scorecard-and-guidance.md)
-- ExecPlans repo conventions: [references/execplans.md](references/execplans.md)
+- `node scripts/legibility.js audit --check-all /path/to/repo` — aggregate report with top-level `status: ok | drift` and one section per check.
+- Individual `--check-*` flags run one check at a time; `--check-artifacts` gates workflow selection. The full flag list is in `legibility.js --help` and [references/audit-checks.md](references/audit-checks.md).
+- `--stale-threshold-days N` adjusts the ExecPlan staleness threshold (default 30).
 
-## Audit Loop
+Exit codes: `0` ok, `1` drift, `2` invalid CLI. Maintenance begins with `legibility audit --check-all` and uses the findings' `remediation` fields as the to-do list.
 
-If this skill is vendored with `scripts/score_repo.js`, use that script to score the repository from repo-visible evidence only.
+Templates (Initial setup shortcut):
 
-Run it from the skill directory or by passing an absolute path, for example:
-
-- `node <skill-dir>/scripts/score_repo.js /path/to/repo`
-- `node <skill-dir>/scripts/score_repo.js /path/to/repo --format markdown`
-- `node <skill-dir>/scripts/score_repo.js /path/to/repo --scope client`
-- `node <skill-dir>/scripts/score_repo.js /path/to/repo --list-scopes`
-- `node <skill-dir>/scripts/score_repo.js /path/to/repo --metric agent_repo_map --metric structured_docs`
-
-`<skill-dir>` is the directory containing this skill. In Claude Code this is `${CLAUDE_SKILL_DIR}`. In other agents, substitute the path where the skill was vendored.
-
-Use the script output to identify the next highest-leverage fixes. The seven scorecard dimensions are:
-
-- bootstrap self-sufficiency
-- task entrypoints
-- validation harness
-- lint and format gates
-- agent repo map
-- structured docs
-- decision records
-
-Use score changes to prioritize the next fixes, not as a substitute for judgment.
+- `node scripts/legibility.js init [--force] /path/to/repo` — scaffolds `AGENTS.md`, `CLAUDE.md` (`@AGENTS.md` include), `.agents/PLANS.md`, `docs/README.md`, and `docs/exec-plans/{active,completed}/`. Emits `{ created, skipped }` JSON. Existing files are skipped without `--force`. After `init`, `--check-artifacts` reports `status: ok`.
 
 ## Quality Bar
 
-The repository is legible when a fresh agent can:
-
-- find the right starting file without guessing
-- bootstrap the project from repo instructions alone
-- pick a canonical command to run the relevant checks
-- understand the main module boundaries before editing
-- find active work and decisions in version control
-- follow a short path from root docs to detailed guidance
+The repository is legible when a fresh agent can find the right starting file without guessing, bootstrap the project from repo instructions alone, pick a canonical command to run the relevant checks, understand the main module boundaries before editing, find active work and decisions in version control, and follow a short path from root docs to detailed guidance.
 
 If a fresh agent would need hidden context from a person or chat thread, the repo is still missing legibility infrastructure.

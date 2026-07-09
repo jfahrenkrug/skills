@@ -1,0 +1,23 @@
+{
+  "name": "legibility",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Mechanical agentic-legibility audit and scoring tool",
+  "scripts": {
+    "embed-templates": "node scripts/embed-templates.mjs",
+    "prebuild": "node scripts/embed-templates.mjs",
+    "pretest": "node scripts/embed-templates.mjs",
+    "pretypecheck": "node scripts/embed-templates.mjs",
+    "build": "vite build",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "verify-bundle": "node scripts/verify-bundle.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "typescript": "^5.4",
+    "vite": "^5",
+    "vitest": "^1"
+  }
+}

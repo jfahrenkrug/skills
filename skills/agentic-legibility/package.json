@@ -1,0 +1,14 @@
+{
+   "name": "agentic-legibility",
+   "version": "0.2.0",
+   "description": "Audit and improve a repository's agentic legibility.",
+   "type": "module",
+   "private": true,
+   "scripts": {
+      "build": "npm -w legibility run build",
+      "test": "npm -w legibility test"
+   },
+   "engines": {
+      "node": ">=20"
+   }
+}
