@@ -7,7 +7,7 @@ If the repository is a monorepo with multiple projects or packages, see [monorep
 ## Workflow
 
 1. **Audit the current repo-visible guidance.**
-   Start with `node scripts/legibility.js audit --check-artifacts /path/to/repo` to confirm which required artifacts are missing; this is what triggered **Initial setup** in the first place. Then inspect the root `README.md`, `AGENTS.md`, `CLAUDE.md`, `docs/`, task entrypoints, validation commands, and any existing decision records. Run `legibility score /path/to/repo` to establish a baseline for the seven scorecard dimensions.
+   Start with `node scripts/legibility.js audit --check-artifacts /path/to/repo` to confirm which required artifacts are missing; this is what triggered **Initial setup** in the first place. Then inspect the root `README.md`, `AGENTS.md`, `CLAUDE.md`, `docs/`, task entrypoints, validation commands, and any existing decision records. Run `legibility score /path/to/repo` to establish a baseline for the eight scorecard dimensions.
 
    In monorepos, also run `legibility list-scopes /path/to/repo` and keep a working inventory of every
    discovered scope. Do not treat the inventory as optional background information.

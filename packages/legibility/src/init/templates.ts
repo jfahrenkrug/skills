@@ -35,7 +35,7 @@ const AGENTS_MD = [
    '## Architecture',
    '',
    'Describe module boundaries and where each subsystem lives, or link to',
-   'a `docs/repo-map.md` / `ARCHITECTURE.md` file that does.',
+   'a repo map (for example an `ARCHITECTURE.md` at the repo root) that does.',
    '',
    '## Working agreements',
    '',

@@ -144,14 +144,12 @@ export async function walkRepo(root: string, excludes: string[] = []): Promise<s
 }
 
 export function findFiles(paths: string[], ...patterns: string[]): string[] {
+   const matchers = patterns.map(globToRegExp);
+
    return paths.filter((relpath) => {
       const basename = path.posix.basename(relpath);
 
-      return patterns.some((pattern) => {
-         const matcher = globToRegExp(pattern);
-
-         return matcher.test(basename) || matcher.test(relpath);
-      });
+      return matchers.some((matcher) => matcher.test(basename) || matcher.test(relpath));
    });
 }
 

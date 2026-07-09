@@ -32,6 +32,15 @@ export interface RequiredArtifact {
    remediation: string;
 }
 
+export interface CheckOptions {
+   excludes?: string[];
+   /** Pre-computed walkRepo result, so --check-all walks the tree once. */
+   files?: string[];
+   /** Pre-computed task surface, so --check-all runs the adapters once. */
+   surfaceByRunner?: Record<string, Set<string>>;
+   staleThresholdDays?: number;
+}
+
 export const REQUIRED_ARTIFACTS: RequiredArtifact[] = [
    { path: 'AGENTS.md', kind: 'file', severity: SEVERITY_ERROR, remediation: 'Create AGENTS.md at the repository root with a concise agent map.' },
    { path: '.agents', kind: 'dir', severity: SEVERITY_ERROR, remediation: 'Create the `.agents/` directory for agent-facing infrastructure.' },
@@ -119,13 +128,27 @@ function resolveLinkTarget(
    return { target: resolved, anchor, originalHref: href };
 }
 
-async function fileExistsInRepo(root: string, relpath: string): Promise<boolean> {
+async function resolveExistingLinkTarget(root: string, relpath: string): Promise<string | null> {
    try {
       const stat = await fs.stat(path.join(root, relpath));
-      return stat.isFile();
+      // Directory links ([docs](docs/)) are valid targets too.
+      if (stat.isFile()) return relpath;
+      if (!stat.isDirectory()) return null;
+
+      for (const entryFile of [ 'README.md', 'index.md' ]) {
+         const entryRelpath = path.posix.join(relpath, entryFile);
+         const entryStat = await fs.stat(path.join(root, entryRelpath)).catch(() => null);
+         if (entryStat?.isFile()) return entryRelpath;
+      }
+
+      return relpath;
    } catch (_error) {
-      return false;
+      return null;
    }
+}
+
+async function fileExistsInRepo(root: string, relpath: string): Promise<boolean> {
+   return (await resolveExistingLinkTarget(root, relpath)) !== null;
 }
 
 function buildEntrySet(markdownPaths: string[]): Set<string> {
@@ -149,10 +172,10 @@ function buildEntrySet(markdownPaths: string[]): Set<string> {
 
 export async function checkLinks(
    root: string,
-   options: { excludes?: string[] } = {},
+   options: CheckOptions = {},
 ): Promise<CheckResult> {
    const excludes = options.excludes || [];
-   const files = await walkRepo(root, excludes);
+   const files = options.files ?? await walkRepo(root, excludes);
    const markdownPaths = files.filter(isMarkdownFile).sort();
    const findings = [];
    const adjacency = new Map<string, Set<string>>();
@@ -184,8 +207,8 @@ export async function checkLinks(
          if (!resolved.target) continue;
          if (resolved.target.startsWith('..')) continue;
 
-         const targetExists = await fileExistsInRepo(root, resolved.target);
-         if (!targetExists) {
+         const effectiveTarget = await resolveExistingLinkTarget(root, resolved.target);
+         if (effectiveTarget === null) {
             findings.push(finding(
                SEVERITY_ERROR,
                relpath,
@@ -196,22 +219,22 @@ export async function checkLinks(
             continue;
          }
 
-         if (resolved.anchor && isMarkdownFile(resolved.target)) {
-            const targetParsed = parsedByFile.get(resolved.target) || parseMarkdown(await readText(path.join(root, resolved.target)));
+         if (resolved.anchor && isMarkdownFile(effectiveTarget)) {
+            const targetParsed = parsedByFile.get(effectiveTarget) || parseMarkdown(await readText(path.join(root, effectiveTarget)));
             const anchors = new Set(targetParsed.headings.map((h) => h.anchor).filter(Boolean));
             if (!anchors.has(resolved.anchor)) {
                findings.push(finding(
                   SEVERITY_WARNING,
                   relpath,
-                  `Broken anchor \`#${resolved.anchor}\` in \`${resolved.target}\` (no matching heading).`,
-                  `Update the anchor to match a heading in \`${resolved.target}\` or add the heading.`,
+                  `Broken anchor \`#${resolved.anchor}\` in \`${effectiveTarget}\` (no matching heading).`,
+                  `Update the anchor to match a heading in \`${effectiveTarget}\` or add the heading.`,
                   link.line,
                ));
             }
          }
 
-         if (isMarkdownFile(resolved.target) && adjacency.has(resolved.target)) {
-            adjacency.get(relpath)!.add(resolved.target);
+         if (isMarkdownFile(effectiveTarget) && adjacency.has(effectiveTarget)) {
+            adjacency.get(relpath)!.add(effectiveTarget);
          }
       }
    }
@@ -275,11 +298,11 @@ const RUNNER_LABEL: Record<string, string> = {
 
 export async function checkCommands(
    root: string,
-   options: { excludes?: string[] } = {},
+   options: CheckOptions = {},
 ): Promise<CheckResult> {
    const excludes = options.excludes || [];
-   const files = await walkRepo(root, excludes);
-   const surfaceByRunner = await collectTaskSurfaceByRunner(root, files);
+   const files = options.files ?? await walkRepo(root, excludes);
+   const surfaceByRunner = options.surfaceByRunner ?? await collectTaskSurfaceByRunner(root, files);
    const findings = [];
    const markdownPaths = files.filter(isMarkdownFile).sort();
 
@@ -326,7 +349,7 @@ async function listExecPlans(root: string, kind: string): Promise<string[]> {
 
 export async function checkExecplans(
    root: string,
-   options: { staleThresholdDays?: number } = {},
+   options: CheckOptions = {},
 ): Promise<CheckResult> {
    const thresholdDays = options.staleThresholdDays ?? DEFAULT_STALE_THRESHOLD_DAYS;
    const findings = [];
@@ -336,10 +359,15 @@ export async function checkExecplans(
    const activePlans = await listExecPlans(root, 'active');
    const completedPlans = await listExecPlans(root, 'completed');
 
+   const parsedByPath = new Map<string, ReturnType<typeof parseExecPlan>>();
    for (const relpath of [ ...activePlans, ...completedPlans ]) {
-      const text = await readText(path.join(root, relpath));
-      const parsed = parseExecPlan(text);
+      parsedByPath.set(relpath, parseExecPlan(await readText(path.join(root, relpath))));
+   }
+   const timestampByPath = new Map(await Promise.all(activePlans.map(async (relpath) => {
+      return [ relpath, await lastActivityTimestamp(root, relpath) ] as const;
+   })));
 
+   for (const [ relpath, parsed ] of parsedByPath) {
       for (const missing of parsed.missingSections) {
          findings.push(finding(
             SEVERITY_WARNING,
@@ -351,9 +379,8 @@ export async function checkExecplans(
    }
 
    for (const relpath of activePlans) {
-      const text = await readText(path.join(root, relpath));
-      const parsed = parseExecPlan(text);
-      const timestamp = await lastActivityTimestamp(root, relpath);
+      const parsed = parsedByPath.get(relpath)!;
+      const timestamp = timestampByPath.get(relpath) ?? null;
       const isStale = timestamp !== null && now - timestamp > thresholdSeconds;
 
       if (isStale) {
@@ -369,11 +396,8 @@ export async function checkExecplans(
       if (parsed.progress.total > 0
          && parsed.progress.remaining === 0
          && parsed.presentSections.has('Outcomes & Retrospective')) {
-         const outcomesBodyPresent = text
-            .split(/^##\s+Outcomes\s*&\s*Retrospective\s*$/mu)[1]
-            ?.replace(/^##\s.*$/msu, '')
-            ?.trim();
-         if (!outcomesBodyPresent) {
+         const outcomesBody = parsed.sectionBodies['Outcomes & Retrospective'] ?? '';
+         if (!outcomesBody.trim()) {
             findings.push(finding(
                SEVERITY_WARNING,
                relpath,
@@ -406,8 +430,7 @@ export async function checkExecplans(
    }
 
    for (const relpath of completedPlans) {
-      const text = await readText(path.join(root, relpath));
-      const parsed = parseExecPlan(text);
+      const parsed = parsedByPath.get(relpath)!;
       if (parsed.progress.remaining > 0) {
          findings.push(finding(
             SEVERITY_WARNING,
@@ -453,11 +476,11 @@ async function repoPathExists(root: string, relpath: string): Promise<boolean> {
 
 export async function checkAgentsMd(
    root: string,
-   options: { excludes?: string[] } = {},
+   options: CheckOptions = {},
 ): Promise<CheckResult> {
    const excludes = options.excludes || [];
-   const files = await walkRepo(root, excludes);
-   const surfaceByRunner = await collectTaskSurfaceByRunner(root, files);
+   const files = options.files ?? await walkRepo(root, excludes);
+   const surfaceByRunner = options.surfaceByRunner ?? await collectTaskSurfaceByRunner(root, files);
    const findings = [];
    const checkedDocs: string[] = [];
 
@@ -683,11 +706,19 @@ export async function checkContextBudget(root: string): Promise<CheckResult> {
 
    for (const docPath of CONTEXT_BUDGET_DOCS) {
       const abs = path.join(root, docPath);
-      if (!(await pathExists(abs, 'file'))) continue;
+      let size: number;
+      try {
+         const stat = await fs.stat(abs);
+         if (!stat.isFile()) continue;
+         size = stat.size;
+      } catch (_error) {
+         continue;
+      }
       checkedCount += 1;
       const text = await readText(abs);
-      if (!text) continue;
-      const tokens = Math.ceil(text.length / 4);
+      // readText returns '' for files over MAX_TEXT_SIZE — exactly the docs
+      // this check must flag — so fall back to the byte size on disk.
+      const tokens = text ? Math.ceil(text.length / 4) : Math.ceil(size / 4);
 
       if (tokens > CONTEXT_BUDGET_ERROR_TOKENS) {
          findings.push(finding(
@@ -804,10 +835,10 @@ async function rootPackageJsonHasWorkspaces(root: string): Promise<boolean> {
 
 export async function checkNesting(
    root: string,
-   options: { excludes?: string[] } = {},
+   options: CheckOptions = {},
 ): Promise<CheckResult> {
    const excludes = options.excludes || [];
-   const files = await walkRepo(root, excludes);
+   const files = options.files ?? await walkRepo(root, excludes);
 
    const hasPnpmWorkspaces = files.includes('pnpm-workspace.yaml') || files.includes('pnpm-workspace.yml');
    const hasNxJson = files.includes('nx.json');
@@ -907,10 +938,10 @@ function isAdrFile(relpath: string): boolean {
 
 export async function checkAdrs(
    root: string,
-   options: { excludes?: string[] } = {},
+   options: CheckOptions = {},
 ): Promise<CheckResult> {
    const excludes = options.excludes || [];
-   const files = await walkRepo(root, excludes);
+   const files = options.files ?? await walkRepo(root, excludes);
    const adrFiles = files.filter(isAdrFile).sort();
 
    if (adrFiles.length === 0) {
@@ -981,7 +1012,7 @@ export async function checkAdrs(
    return checkResult('adrs', findings, summary);
 }
 
-type CheckFn = (root: string, options?: Record<string, unknown>) => Promise<CheckResult>;
+type CheckFn = (root: string, options?: CheckOptions) => Promise<CheckResult>;
 
 export const AVAILABLE_CHECKS: Record<string, CheckFn> = {
    artifacts: checkArtifacts as CheckFn,
@@ -997,16 +1028,33 @@ export const AVAILABLE_CHECKS: Record<string, CheckFn> = {
    adrs: checkAdrs as CheckFn,
 };
 
-export async function runAudit(root: string, selectedChecks: string[]): Promise<AuditReport> {
+const CHECKS_USING_FILES = new Set([ 'links', 'commands', 'agents_md', 'nesting', 'adrs' ]);
+const CHECKS_USING_SURFACE = new Set([ 'commands', 'agents_md' ]);
+
+export async function runAudit(
+   root: string,
+   selectedChecks: string[],
+   options: CheckOptions = {},
+): Promise<AuditReport> {
    const results: Record<string, CheckResult> = {};
    const names = selectedChecks.length > 0 ? selectedChecks : Object.keys(AVAILABLE_CHECKS);
 
    for (const name of names) {
-      const runner = AVAILABLE_CHECKS[name];
-      if (!runner) {
+      if (!AVAILABLE_CHECKS[name]) {
          throw new Error(`Unknown check: ${name}. Valid checks: ${Object.keys(AVAILABLE_CHECKS).join(', ')}`);
       }
-      results[name] = await runner(root);
+   }
+
+   const shared: CheckOptions = { ...options };
+   if (!shared.files && names.some((name) => CHECKS_USING_FILES.has(name))) {
+      shared.files = await walkRepo(root, shared.excludes || []);
+   }
+   if (!shared.surfaceByRunner && shared.files && names.some((name) => CHECKS_USING_SURFACE.has(name))) {
+      shared.surfaceByRunner = await collectTaskSurfaceByRunner(root, shared.files);
+   }
+
+   for (const name of names) {
+      results[name] = await AVAILABLE_CHECKS[name](root, shared);
    }
 
    return auditReport(root, results);
@@ -1017,6 +1065,7 @@ export interface AuditCliArgs {
    format: 'json' | 'markdown';
    checks: string[];
    runAll: boolean;
+   staleThresholdDays?: number;
 }
 
 export function parseCliArgs(argv: string[]): AuditCliArgs {
@@ -1038,6 +1087,13 @@ export function parseCliArgs(argv: string[]): AuditCliArgs {
             throw new Error('--format requires either json or markdown');
          }
          args.format = value;
+         index += 1;
+      } else if (arg === '--stale-threshold-days') {
+         const value = argv[index + 1];
+         if (!value || !/^\d+$/u.test(value) || Number.parseInt(value, 10) < 1) {
+            throw new Error('--stale-threshold-days requires a positive integer number of days');
+         }
+         args.staleThresholdDays = Number.parseInt(value, 10);
          index += 1;
       } else if (arg === '--check-all') {
          args.runAll = true;
@@ -1076,11 +1132,12 @@ export async function runCli(argv: string[] = process.argv.slice(2)): Promise<vo
 
    const checks = args.runAll ? Object.keys(AVAILABLE_CHECKS) : args.checks;
    const singleCheck = checks.length === 1 && !args.runAll;
+   const options: CheckOptions = { staleThresholdDays: args.staleThresholdDays };
 
    if (singleCheck) {
       const name = checks[0];
       const runner = AVAILABLE_CHECKS[name];
-      const result = await runner(root);
+      const result = await runner(root, options);
       const output = args.format === 'markdown'
          ? formatSingleCheckMarkdown(result)
          : formatSingleCheckJson(result);
@@ -1091,7 +1148,7 @@ export async function runCli(argv: string[] = process.argv.slice(2)): Promise<vo
       return;
    }
 
-   const report = await runAudit(root, checks);
+   const report = await runAudit(root, checks, options);
    const output = args.format === 'markdown'
       ? formatAuditMarkdown(report)
       : formatJson(report);

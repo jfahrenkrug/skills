@@ -9,7 +9,6 @@ import {
 } from './lib/fs_walk.js';
 import {
    MANIFEST_FILE_NAMES,
-   TASK_FILE_NAMES,
    categorizeTaskSurface,
    collectAllTaskSurfaces,
 } from './languages/index.js';
@@ -236,7 +235,7 @@ function discoverScopes(ctx: RepoContext): ScopeSignals[] {
 
       const signals = setDefault(signalsByScope, directScope);
 
-      if (TASK_FILE_NAMES.has(filename) && ctx.task_surface_files.has(relpath)) {
+      if (ctx.task_surface_files.has(relpath)) {
          signals.add(`task_surface:${parts[parts.length - 1]}`);
       }
 
@@ -846,7 +845,7 @@ export async function buildReport(
    const normalizedScope = scope ? normalizeScope(root, scope) : undefined;
    const [ evaluatedScope, discoveredScopes, scopeSelection ] = chooseScope(rootContext, normalizedScope);
    const targetRoot = evaluatedScope === ROOT_SCOPE ? root : path.resolve(root, evaluatedScope);
-   const context = await collectContext(targetRoot, excludes);
+   const context = targetRoot === root ? rootContext : await collectContext(targetRoot, excludes);
    const metrics: Record<string, MetricResult> = {};
 
    for (const metricName of selectedMetrics) {

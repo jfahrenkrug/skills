@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { runInit } from '../../src/init/index.js';
-import { checkArtifacts } from '../../src/audit_repo.js';
+import { checkAgentsMd, checkArtifacts, checkLinks } from '../../src/audit_repo.js';
 import { cleanup, makeFixtureRoot, writeFile } from '../helpers/make_fixture.js';
 
 let lastRoot: string | undefined;
@@ -43,6 +43,16 @@ describe('runInit', () => {
       const audit = await checkArtifacts(root);
       expect(audit.status).toBe('ok');
       expect(audit.findings).toEqual([]);
+   });
+
+   it('produces agent docs that pass --check-agents-md and --check-links', async () => {
+      const root = await makeRoot();
+      await runInit(root);
+      const agentsMd = await checkAgentsMd(root);
+      expect(agentsMd.findings).toEqual([]);
+      expect(agentsMd.status).toBe('ok');
+      const links = await checkLinks(root);
+      expect(links.findings.filter((f) => f.severity === 'error')).toEqual([]);
    });
 
    it('skips existing files without --force', async () => {

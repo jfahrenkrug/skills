@@ -59,30 +59,6 @@ export const ALL_ADAPTERS: LanguageAdapter[] = [
 
 export const TASK_FILE_PATTERNS: string[] = ALL_ADAPTERS.flatMap((a) => a.patterns);
 
-export const TASK_FILE_NAMES = new Set([
-   'makefile',
-   'justfile',
-   'taskfile.yml',
-   'taskfile.yaml',
-   'package.json',
-   'pyproject.toml',
-   'tox.ini',
-   'build.gradle',
-   'build.gradle.kts',
-   'pom.xml',
-   'cmakelists.txt',
-   'composer.json',
-   'rakefile',
-   'rakefile.rb',
-   'fastfile',
-   'nx.json',
-   'project.json',
-   'turbo.json',
-   '.mise.toml',
-   'mise.toml',
-   'mix.exs',
-]);
-
 export const MANIFEST_FILE_NAMES = new Set([
    'build.gradle',
    'build.gradle.kts',

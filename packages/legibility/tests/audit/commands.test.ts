@@ -74,4 +74,21 @@ describe('checkCommands', () => {
          expect.stringContaining('`install`'),
       ]);
    });
+
+   it('does not flag canonical nx and maven invocation forms', async () => {
+      const root = await makeRepo();
+      await writeFile(root, 'README.md', [
+         '# Project',
+         '',
+         'Run `npx nx run web:build`, `nx affected -t test`, and `mvn spring-boot:run`.',
+         'But `nx run web:deploy` names a missing target.',
+      ].join('\n'));
+      await writeFile(root, 'nx.json', JSON.stringify({ targetDefaults: { build: {}, test: {} } }));
+      await writeFile(root, 'pom.xml', '<project></project>\n');
+
+      const result = await checkCommands(root);
+
+      expect(result.findings).toHaveLength(1);
+      expect(result.findings[0].message).toContain('`deploy`');
+   });
 });

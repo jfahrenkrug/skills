@@ -46,4 +46,14 @@ describe('checkContextBudget', () => {
       const result = await checkContextBudget(root);
       expect(result.findings.length).toBe(0);
    });
+
+   it('errors on docs larger than the readText cap instead of skipping them', async () => {
+      const root = await makeRepo();
+      // 300KB exceeds MAX_TEXT_SIZE (250KB), so readText returns '' — the
+      // check must fall back to the on-disk size, not report ok.
+      await writeFile(root, 'AGENTS.md', 'a '.repeat(150_000));
+      const result = await checkContextBudget(root);
+      expect(result.findings.length).toBe(1);
+      expect(result.findings[0].severity).toBe('error');
+   });
 });

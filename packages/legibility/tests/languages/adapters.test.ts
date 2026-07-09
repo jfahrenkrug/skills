@@ -23,7 +23,6 @@ import { parseMiseTasks, miseAdapter } from '../../src/languages/mise.js';
 import { deriveMixTaskName, mixAdapter } from '../../src/languages/mix.js';
 import {
    ALL_ADAPTERS,
-   TASK_FILE_NAMES,
    MANIFEST_FILE_NAMES,
    TASK_FILE_PATTERNS,
    categorizeTaskSurface,
@@ -39,12 +38,6 @@ async function rmDir(dir: string): Promise<void> {
 }
 
 describe('constants', () => {
-   it('TASK_FILE_NAMES includes common task runner filenames', () => {
-      expect(TASK_FILE_NAMES.has('package.json')).toBe(true);
-      expect(TASK_FILE_NAMES.has('makefile')).toBe(true);
-      expect(TASK_FILE_NAMES.has('justfile')).toBe(true);
-   });
-
    it('MANIFEST_FILE_NAMES includes common manifest filenames', () => {
       expect(MANIFEST_FILE_NAMES.has('pyproject.toml')).toBe(true);
       expect(MANIFEST_FILE_NAMES.has('go.mod')).toBe(true);
@@ -551,6 +544,49 @@ describe('parseRakefile', () => {
       ].join('\n');
       const result = parseRakefile(text);
       expect(result.has('assets:precompile:clean')).toBe(true);
+   });
+
+   it('keeps the namespace prefix across def/if/class blocks that close with end', () => {
+      const text = [
+         'namespace :db do',
+         '  def helper',
+         '    1',
+         '  end',
+         '',
+         '  if ENV["CI"]',
+         '    puts "ci"',
+         '  end',
+         '',
+         '  task :migrate do',
+         '  end',
+         'end',
+         '',
+         'namespace :assets do',
+         '  class Helper',
+         '  end',
+         '',
+         '  task :clean do',
+         '  end',
+         'end',
+      ].join('\n');
+      const result = parseRakefile(text);
+      expect(result.has('db:migrate')).toBe(true);
+      expect(result.has('assets:clean')).toBe(true);
+      expect(result.has('migrate')).toBe(false);
+   });
+
+   it('does not push a block for endless defs or one-line blocks', () => {
+      const text = [
+         'namespace :db do',
+         '  def version = "1.0"',
+         '  def check(x) = x.valid?',
+         '  if ENV["CI"] then puts "ci" end',
+         '  task :migrate do',
+         '  end',
+         'end',
+      ].join('\n');
+      const result = parseRakefile(text);
+      expect(result.has('db:migrate')).toBe(true);
    });
 });
 

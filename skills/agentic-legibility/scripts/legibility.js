@@ -3,7 +3,8 @@
 // Source: packages/legibility/src/
 // Rebuild: cd packages/legibility && npm run build
 import path from "node:path";
-import { promises } from "node:fs";
+import { promises, realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 const IGNORED_DIRS = /* @__PURE__ */ new Set([
@@ -120,12 +121,10 @@ async function walkRepo(root, excludes = []) {
   return results;
 }
 function findFiles(paths, ...patterns) {
+  const matchers = patterns.map(globToRegExp);
   return paths.filter((relpath) => {
     const basename = path.posix.basename(relpath);
-    return patterns.some((pattern) => {
-      const matcher = globToRegExp(pattern);
-      return matcher.test(basename) || matcher.test(relpath);
-    });
+    return matchers.some((matcher) => matcher.test(basename) || matcher.test(relpath));
   });
 }
 async function readCandidates(paths, root, patterns) {
@@ -590,6 +589,8 @@ const TASK_SYM = /^\s*task\s+:([A-Za-z_][A-Za-z0-9_]*)\b/u;
 const TASK_STR = /^\s*task\s+["']([A-Za-z_][A-Za-z0-9_]*)["']/u;
 const BLOCK_END = /^\s*end\b/u;
 const BLOCK_OPEN = /\bdo\b(\s*\|[^|]*\|)?\s*$|\{\s*(?:\|[^|]*\|)?\s*$/u;
+const KEYWORD_BLOCK_OPEN = /^\s*(?:def|class|module|if|unless|case|while|until|for|begin)\b/u;
+const ENDLESS_DEF = /^\s*def\s+(?:self\.)?[a-z_][A-Za-z0-9_]*[?!]?\s*(?:\([^)]*\))?\s*=(?!=)/u;
 function parseRakefile(text) {
   const names = /* @__PURE__ */ new Set();
   const stack = [];
@@ -617,6 +618,10 @@ function parseRakefile(text) {
     }
     if (BLOCK_END.test(line)) {
       if (stack.length > 0) stack.pop();
+      continue;
+    }
+    if (KEYWORD_BLOCK_OPEN.test(line) && !ENDLESS_DEF.test(line) && !/\bend\s*$/u.test(trimmed)) {
+      stack.push({ kind: "other" });
       continue;
     }
     if (BLOCK_OPEN.test(line)) {
@@ -916,29 +921,6 @@ const ALL_ADAPTERS = [
   mixAdapter
 ];
 const TASK_FILE_PATTERNS = ALL_ADAPTERS.flatMap((a) => a.patterns);
-const TASK_FILE_NAMES = /* @__PURE__ */ new Set([
-  "makefile",
-  "justfile",
-  "taskfile.yml",
-  "taskfile.yaml",
-  "package.json",
-  "pyproject.toml",
-  "tox.ini",
-  "build.gradle",
-  "build.gradle.kts",
-  "pom.xml",
-  "cmakelists.txt",
-  "composer.json",
-  "rakefile",
-  "rakefile.rb",
-  "fastfile",
-  "nx.json",
-  "project.json",
-  "turbo.json",
-  ".mise.toml",
-  "mise.toml",
-  "mix.exs"
-]);
 const MANIFEST_FILE_NAMES = /* @__PURE__ */ new Set([
   "build.gradle",
   "build.gradle.kts",
@@ -1183,7 +1165,7 @@ function discoverScopes(ctx) {
       setDefault(signalsByScope, directScope).add("scope_readme:README.md");
     }
     const signals = setDefault(signalsByScope, directScope);
-    if (TASK_FILE_NAMES.has(filename) && ctx.task_surface_files.has(relpath)) {
+    if (ctx.task_surface_files.has(relpath)) {
       signals.add(`task_surface:${parts[parts.length - 1]}`);
     }
     if (MANIFEST_FILE_NAMES.has(filename)) {
@@ -1643,7 +1625,7 @@ async function buildReport(root, excludes, selectedMetrics, scope) {
   const normalizedScope = scope ? normalizeScope(root, scope) : void 0;
   const [evaluatedScope, discoveredScopes, scopeSelection] = chooseScope(rootContext, normalizedScope);
   const targetRoot = evaluatedScope === ROOT_SCOPE ? root : path.resolve(root, evaluatedScope);
-  const context = await collectContext(targetRoot, excludes);
+  const context = targetRoot === root ? rootContext : await collectContext(targetRoot, excludes);
   const metrics = {};
   for (const metricName of selectedMetrics) {
     metrics[metricName] = await METRIC_SCORERS[metricName](context);
@@ -1952,6 +1934,9 @@ function parseMarkdown(text) {
     const stripped = stripInlineCode(line);
     extractLineLinks(stripped, lineNumber, links);
   }
+  if (inFence) {
+    codeBlockRanges.push([fenceStart, lines.length]);
+  }
   return { links, headings, codeBlockRanges, referenceDefinitions };
 }
 function extractLineLinks(line, lineNumber, outLinks) {
@@ -2059,22 +2044,6 @@ function extractInlineCodeSpans(text) {
   }
   return spans;
 }
-const TASK_REFERENCE_PATTERNS = [
-  { runner: "javascript", regex: /(?:^|[\s&;|(])(?:npm|pnpm|yarn|bun)\s+run(?:-script)?\s+([A-Za-z0-9_.:-]+)/gu },
-  { runner: "make", regex: /(?:^|[\s&;|(])make\s+([A-Za-z0-9_.:-]+)/gu },
-  { runner: "just", regex: /(?:^|[\s&;|(])just\s+([A-Za-z0-9_.:-]+)/gu },
-  { runner: "task", regex: /(?:^|[\s&;|(])task\s+([A-Za-z0-9_.:-]+)/gu },
-  { runner: "cargo", regex: /(?:^|[\s&;|(])cargo\s+([A-Za-z0-9_.:-]+)/gu },
-  { runner: "gradle", regex: /(?:^|[\s&;|(])(?:\.\/)?gradlew?\s+([A-Za-z0-9_.:-]+)/gu },
-  { runner: "maven", regex: /(?:^|[\s&;|(])(?:mvn|mvnw|\.\/mvnw)\s+([A-Za-z0-9_.:-]+)/gu },
-  { runner: "composer", regex: /(?:^|[\s&;|(])composer\s+run(?:-script)?\s+([A-Za-z0-9_.:-]+)/gu },
-  { runner: "composer", regex: /(?:^|[\s&;|(])composer\s+([A-Za-z0-9_.:-]+)/gu, filterBuiltins: true },
-  { runner: "rake", regex: /(?:^|[\s&;|(])(?:bundle\s+exec\s+)?rake\s+([A-Za-z0-9_.:-]+)/gu },
-  { runner: "nx", regex: /(?:^|[\s&;|(])(?:npx\s+|pnpm\s+|yarn\s+)?nx\s+(?:run\s+)?([A-Za-z0-9_.:-]+)/gu },
-  { runner: "turbo", regex: /(?:^|[\s&;|(])(?:npx\s+|pnpm\s+|yarn\s+)?turbo\s+(?:run\s+)?([A-Za-z0-9_.:-]+)/gu },
-  { runner: "mise", regex: /(?:^|[\s&;|(])mise\s+run\s+([A-Za-z0-9_.:-]+)/gu },
-  { runner: "mix", regex: /(?:^|[\s&;|(])mix\s+([A-Za-z0-9_.:-]+)/gu }
-];
 function isPlaceholderToken(token) {
   if (/^[A-Z]$/u.test(token)) return true;
   if (/^[A-Z][A-Z0-9_-]*$/u.test(token) && token.length <= 8) return true;
@@ -2202,22 +2171,135 @@ const CARGO_BUILTINS = /* @__PURE__ */ new Set([
   "expand",
   "bench"
 ]);
+const NX_BUILTINS = /* @__PURE__ */ new Set([
+  "add",
+  "affected",
+  "connect",
+  "daemon",
+  "exec",
+  "format",
+  "format:check",
+  "format:write",
+  "g",
+  "generate",
+  "graph",
+  "import",
+  "init",
+  "list",
+  "login",
+  "logout",
+  "migrate",
+  "release",
+  "repair",
+  "report",
+  "reset",
+  "run",
+  "run-many",
+  "show",
+  "sync",
+  "watch"
+]);
+const TURBO_BUILTINS = /* @__PURE__ */ new Set([
+  "bin",
+  "daemon",
+  "gen",
+  "generate",
+  "info",
+  "link",
+  "login",
+  "logout",
+  "ls",
+  "prune",
+  "query",
+  "run",
+  "scan",
+  "telemetry",
+  "unlink",
+  "watch"
+]);
+const MIX_BUILTINS = /* @__PURE__ */ new Set([
+  "archive",
+  "clean",
+  "compile",
+  "credo",
+  "deps",
+  "deps.clean",
+  "deps.compile",
+  "deps.get",
+  "deps.tree",
+  "deps.unlock",
+  "deps.update",
+  "dialyzer",
+  "do",
+  "docs",
+  "ecto.create",
+  "ecto.drop",
+  "ecto.migrate",
+  "ecto.reset",
+  "ecto.rollback",
+  "ecto.setup",
+  "escript.build",
+  "format",
+  "help",
+  "hex.info",
+  "local.hex",
+  "local.rebar",
+  "new",
+  "phx.gen.html",
+  "phx.new",
+  "phx.routes",
+  "phx.server",
+  "release",
+  "run",
+  "test",
+  "xref"
+]);
+function normalizeNxToken(token) {
+  if (!token.includes(":")) return token;
+  const segments = token.split(":");
+  return segments.length >= 2 && segments[1] ? segments[1] : null;
+}
+function normalizeGradleToken(token) {
+  const segments = token.split(":").filter(Boolean);
+  return segments.length > 0 ? segments[segments.length - 1] : null;
+}
+function normalizeMavenToken(token) {
+  return token.includes(":") ? null : token;
+}
+const TASK_REFERENCE_PATTERNS = [
+  { runner: "javascript", regex: /(?:^|[\s&;|(])(?:npm|pnpm|yarn|bun)\s+run(?:-script)?\s+([A-Za-z0-9_.:-]+)/gu },
+  { runner: "make", regex: /(?:^|[\s&;|(])make\s+([A-Za-z0-9_.:-]+)/gu, builtins: MAKE_BUILTINS },
+  { runner: "just", regex: /(?:^|[\s&;|(])just\s+([A-Za-z0-9_.:-]+)/gu },
+  { runner: "task", regex: /(?:^|[\s&;|(])task\s+([A-Za-z0-9_.:-]+)/gu },
+  { runner: "cargo", regex: /(?:^|[\s&;|(])cargo\s+([A-Za-z0-9_.:-]+)/gu, builtins: CARGO_BUILTINS },
+  { runner: "gradle", regex: /(?:^|[\s&;|(])(?:\.\/)?gradlew?\s+([A-Za-z0-9_.:-]+)/gu, builtins: GRADLE_BUILTINS, normalize: normalizeGradleToken },
+  { runner: "maven", regex: /(?:^|[\s&;|(])(?:mvn|mvnw|\.\/mvnw)\s+([A-Za-z0-9_.:-]+)/gu, builtins: MAVEN_BUILTINS, normalize: normalizeMavenToken },
+  { runner: "composer", regex: /(?:^|[\s&;|(])composer\s+run(?:-script)?\s+([A-Za-z0-9_.:-]+)/gu },
+  { runner: "composer", regex: /(?:^|[\s&;|(])composer\s+([A-Za-z0-9_.:-]+)/gu, builtins: COMPOSER_BUILTINS },
+  { runner: "rake", regex: /(?:^|[\s&;|(])(?:bundle\s+exec\s+)?rake\s+([A-Za-z0-9_.:-]+)/gu },
+  { runner: "nx", regex: /(?:^|[\s&;|(])(?:npx\s+|pnpm\s+|yarn\s+)?nx\s+(?:run\s+)?([A-Za-z0-9_.:-]+)/gu, builtins: NX_BUILTINS, normalize: normalizeNxToken },
+  { runner: "turbo", regex: /(?:^|[\s&;|(])(?:npx\s+|pnpm\s+|yarn\s+)?turbo\s+(?:run\s+)?([A-Za-z0-9_.:-]+)/gu, builtins: TURBO_BUILTINS },
+  { runner: "mise", regex: /(?:^|[\s&;|(])mise\s+run\s+([A-Za-z0-9_.:-]+)/gu },
+  { runner: "mix", regex: /(?:^|[\s&;|(])mix\s+([A-Za-z0-9_.:-]+)/gu, builtins: MIX_BUILTINS }
+];
 function extractTaskReferences(text) {
   const snippets = extractCodeSnippets(text);
   const references = [];
   for (const { snippet, line } of snippets) {
-    for (const { runner, regex, filterBuiltins } of TASK_REFERENCE_PATTERNS) {
+    for (const { runner, regex, builtins, normalize } of TASK_REFERENCE_PATTERNS) {
       regex.lastIndex = 0;
       let match;
       while ((match = regex.exec(snippet)) !== null) {
-        const token = match[1];
+        let token = match[1];
         if (token.startsWith("-")) continue;
+        if (builtins?.has(token)) continue;
+        if (normalize) {
+          const normalized = normalize(token);
+          if (normalized === null) continue;
+          token = normalized;
+        }
+        if (builtins?.has(token)) continue;
         if (isPlaceholderToken(token)) continue;
-        if (runner === "make" && MAKE_BUILTINS.has(token)) continue;
-        if (runner === "cargo" && CARGO_BUILTINS.has(token)) continue;
-        if (runner === "gradle" && GRADLE_BUILTINS.has(token)) continue;
-        if (runner === "maven" && MAVEN_BUILTINS.has(token)) continue;
-        if (runner === "composer" && filterBuiltins && COMPOSER_BUILTINS.has(token)) continue;
         references.push({
           runner,
           token,
@@ -2247,26 +2329,25 @@ const CHECKBOX_REGEX = /^\s*[*-]\s+\[([ xX])\]/u;
 function normalizeHeading(text) {
   return text.trim().replace(/\s+/gu, " ").toLowerCase();
 }
-function extractSectionBodies(text, headingTexts) {
+function isFencedLine(lineNumber, codeBlockRanges) {
+  return codeBlockRanges.some(([start, end]) => lineNumber >= start && lineNumber <= end);
+}
+function extractSectionBodies(lines, headings) {
   const bodies = {};
-  const lines = text.split(/\r?\n/u);
-  const headingLines = [];
-  for (let i = 0; i < lines.length; i += 1) {
-    const m = lines[i].match(/^##\s+(.*?)\s*#*\s*$/u);
-    if (m) {
-      headingLines.push({ index: i, text: m[1] });
-    }
-  }
-  for (let i = 0; i < headingLines.length; i += 1) {
-    const start = headingLines[i].index + 1;
-    const end = i + 1 < headingLines.length ? headingLines[i + 1].index : lines.length;
+  const sectionHeadings = headings.filter((h) => h.level === 2);
+  for (let i = 0; i < sectionHeadings.length; i += 1) {
+    const start = sectionHeadings[i].line;
+    const end = i + 1 < sectionHeadings.length ? sectionHeadings[i + 1].line - 1 : lines.length;
     const body = lines.slice(start, end).join("\n").trim();
-    bodies[headingLines[i].text.trim()] = body;
+    const canonical = REQUIRED_SECTIONS.find((name) => {
+      return normalizeHeading(name) === normalizeHeading(sectionHeadings[i].text);
+    });
+    bodies[canonical ?? sectionHeadings[i].text.trim()] = body;
   }
   return bodies;
 }
 function parseExecPlan(text) {
-  const { headings } = parseMarkdown(text);
+  const { headings, codeBlockRanges } = parseMarkdown(text);
   const presentHeadings = new Set(headings.map((h) => normalizeHeading(h.text)));
   const presentSections = /* @__PURE__ */ new Set();
   const missingSections = [];
@@ -2277,9 +2358,11 @@ function parseExecPlan(text) {
       missingSections.push(name);
     }
   }
+  const lines = text.split(/\r?\n/u);
   const progress = { total: 0, done: 0, remaining: 0 };
-  for (const line of text.split(/\r?\n/u)) {
-    const match = line.match(CHECKBOX_REGEX);
+  for (let index = 0; index < lines.length; index += 1) {
+    if (isFencedLine(index + 1, codeBlockRanges)) continue;
+    const match = lines[index].match(CHECKBOX_REGEX);
     if (!match) continue;
     progress.total += 1;
     if (match[1] === "x" || match[1] === "X") {
@@ -2288,7 +2371,7 @@ function parseExecPlan(text) {
       progress.remaining += 1;
     }
   }
-  const sectionBodies = extractSectionBodies(text, headings.map((h) => h.text));
+  const sectionBodies = extractSectionBodies(lines, headings);
   return {
     headings: headings.map((h) => h.text),
     presentSections,
@@ -2392,13 +2475,23 @@ function resolveLinkTarget(fromRelpath, href) {
   const resolved = path.posix.normalize(joined);
   return { target: resolved, anchor, originalHref: href };
 }
-async function fileExistsInRepo(root, relpath) {
+async function resolveExistingLinkTarget(root, relpath) {
   try {
     const stat = await promises.stat(path.join(root, relpath));
-    return stat.isFile();
+    if (stat.isFile()) return relpath;
+    if (!stat.isDirectory()) return null;
+    for (const entryFile of ["README.md", "index.md"]) {
+      const entryRelpath = path.posix.join(relpath, entryFile);
+      const entryStat = await promises.stat(path.join(root, entryRelpath)).catch(() => null);
+      if (entryStat?.isFile()) return entryRelpath;
+    }
+    return relpath;
   } catch (_error) {
-    return false;
+    return null;
   }
+}
+async function fileExistsInRepo(root, relpath) {
+  return await resolveExistingLinkTarget(root, relpath) !== null;
 }
 function buildEntrySet(markdownPaths) {
   const entrySet = /* @__PURE__ */ new Set();
@@ -2420,7 +2513,7 @@ function buildEntrySet(markdownPaths) {
 }
 async function checkLinks(root, options = {}) {
   const excludes = options.excludes || [];
-  const files = await walkRepo(root, excludes);
+  const files = options.files ?? await walkRepo(root, excludes);
   const markdownPaths = files.filter(isMarkdownFile).sort();
   const findings = [];
   const adjacency = /* @__PURE__ */ new Map();
@@ -2448,8 +2541,8 @@ async function checkLinks(root, options = {}) {
       const resolved = resolveLinkTarget(relpath, resolvedHref);
       if (!resolved.target) continue;
       if (resolved.target.startsWith("..")) continue;
-      const targetExists = await fileExistsInRepo(root, resolved.target);
-      if (!targetExists) {
+      const effectiveTarget = await resolveExistingLinkTarget(root, resolved.target);
+      if (effectiveTarget === null) {
         findings.push(finding(
           SEVERITY_ERROR,
           relpath,
@@ -2459,21 +2552,21 @@ async function checkLinks(root, options = {}) {
         ));
         continue;
       }
-      if (resolved.anchor && isMarkdownFile(resolved.target)) {
-        const targetParsed = parsedByFile.get(resolved.target) || parseMarkdown(await readText(path.join(root, resolved.target)));
+      if (resolved.anchor && isMarkdownFile(effectiveTarget)) {
+        const targetParsed = parsedByFile.get(effectiveTarget) || parseMarkdown(await readText(path.join(root, effectiveTarget)));
         const anchors = new Set(targetParsed.headings.map((h) => h.anchor).filter(Boolean));
         if (!anchors.has(resolved.anchor)) {
           findings.push(finding(
             SEVERITY_WARNING,
             relpath,
-            `Broken anchor \`#${resolved.anchor}\` in \`${resolved.target}\` (no matching heading).`,
-            `Update the anchor to match a heading in \`${resolved.target}\` or add the heading.`,
+            `Broken anchor \`#${resolved.anchor}\` in \`${effectiveTarget}\` (no matching heading).`,
+            `Update the anchor to match a heading in \`${effectiveTarget}\` or add the heading.`,
             link.line
           ));
         }
       }
-      if (isMarkdownFile(resolved.target) && adjacency.has(resolved.target)) {
-        adjacency.get(relpath).add(resolved.target);
+      if (isMarkdownFile(effectiveTarget) && adjacency.has(effectiveTarget)) {
+        adjacency.get(relpath).add(effectiveTarget);
       }
     }
   }
@@ -2529,8 +2622,8 @@ const RUNNER_LABEL = {
 };
 async function checkCommands(root, options = {}) {
   const excludes = options.excludes || [];
-  const files = await walkRepo(root, excludes);
-  const surfaceByRunner = await collectTaskSurfaceByRunner(root, files);
+  const files = options.files ?? await walkRepo(root, excludes);
+  const surfaceByRunner = options.surfaceByRunner ?? await collectTaskSurfaceByRunner(root, files);
   const findings = [];
   const markdownPaths = files.filter(isMarkdownFile).sort();
   for (const relpath of markdownPaths) {
@@ -2569,9 +2662,14 @@ async function checkExecplans(root, options = {}) {
   const thresholdSeconds = thresholdDays * 86400;
   const activePlans = await listExecPlans(root, "active");
   const completedPlans = await listExecPlans(root, "completed");
+  const parsedByPath = /* @__PURE__ */ new Map();
   for (const relpath of [...activePlans, ...completedPlans]) {
-    const text = await readText(path.join(root, relpath));
-    const parsed = parseExecPlan(text);
+    parsedByPath.set(relpath, parseExecPlan(await readText(path.join(root, relpath))));
+  }
+  const timestampByPath = new Map(await Promise.all(activePlans.map(async (relpath) => {
+    return [relpath, await lastActivityTimestamp(root, relpath)];
+  })));
+  for (const [relpath, parsed] of parsedByPath) {
     for (const missing of parsed.missingSections) {
       findings.push(finding(
         SEVERITY_WARNING,
@@ -2582,9 +2680,8 @@ async function checkExecplans(root, options = {}) {
     }
   }
   for (const relpath of activePlans) {
-    const text = await readText(path.join(root, relpath));
-    const parsed = parseExecPlan(text);
-    const timestamp = await lastActivityTimestamp(root, relpath);
+    const parsed = parsedByPath.get(relpath);
+    const timestamp = timestampByPath.get(relpath) ?? null;
     const isStale = timestamp !== null && now - timestamp > thresholdSeconds;
     if (isStale) {
       const days = Math.floor((now - timestamp) / 86400);
@@ -2596,8 +2693,8 @@ async function checkExecplans(root, options = {}) {
       ));
     }
     if (parsed.progress.total > 0 && parsed.progress.remaining === 0 && parsed.presentSections.has("Outcomes & Retrospective")) {
-      const outcomesBodyPresent = text.split(/^##\s+Outcomes\s*&\s*Retrospective\s*$/mu)[1]?.replace(/^##\s.*$/msu, "")?.trim();
-      if (!outcomesBodyPresent) {
+      const outcomesBody = parsed.sectionBodies["Outcomes & Retrospective"] ?? "";
+      if (!outcomesBody.trim()) {
         findings.push(finding(
           SEVERITY_WARNING,
           relpath,
@@ -2627,8 +2724,7 @@ async function checkExecplans(root, options = {}) {
     }
   }
   for (const relpath of completedPlans) {
-    const text = await readText(path.join(root, relpath));
-    const parsed = parseExecPlan(text);
+    const parsed = parsedByPath.get(relpath);
     if (parsed.progress.remaining > 0) {
       findings.push(finding(
         SEVERITY_WARNING,
@@ -2666,8 +2762,8 @@ async function repoPathExists(root, relpath) {
 }
 async function checkAgentsMd(root, options = {}) {
   const excludes = options.excludes || [];
-  const files = await walkRepo(root, excludes);
-  const surfaceByRunner = await collectTaskSurfaceByRunner(root, files);
+  const files = options.files ?? await walkRepo(root, excludes);
+  const surfaceByRunner = options.surfaceByRunner ?? await collectTaskSurfaceByRunner(root, files);
   const findings = [];
   const checkedDocs = [];
   for (const relpath of AGENT_DOC_CANDIDATES) {
@@ -2861,11 +2957,17 @@ async function checkContextBudget(root) {
   let checkedCount = 0;
   for (const docPath of CONTEXT_BUDGET_DOCS) {
     const abs = path.join(root, docPath);
-    if (!await pathExists$1(abs, "file")) continue;
+    let size;
+    try {
+      const stat = await promises.stat(abs);
+      if (!stat.isFile()) continue;
+      size = stat.size;
+    } catch (_error) {
+      continue;
+    }
     checkedCount += 1;
     const text = await readText(abs);
-    if (!text) continue;
-    const tokens = Math.ceil(text.length / 4);
+    const tokens = text ? Math.ceil(text.length / 4) : Math.ceil(size / 4);
     if (tokens > CONTEXT_BUDGET_ERROR_TOKENS) {
       findings.push(finding(
         SEVERITY_ERROR,
@@ -2960,7 +3062,7 @@ async function rootPackageJsonHasWorkspaces(root) {
 }
 async function checkNesting(root, options = {}) {
   const excludes = options.excludes || [];
-  const files = await walkRepo(root, excludes);
+  const files = options.files ?? await walkRepo(root, excludes);
   const hasPnpmWorkspaces = files.includes("pnpm-workspace.yaml") || files.includes("pnpm-workspace.yml");
   const hasNxJson = files.includes("nx.json");
   const projectJsonFiles = files.filter((f) => path.posix.basename(f) === "project.json");
@@ -3039,7 +3141,7 @@ function isAdrFile(relpath) {
 }
 async function checkAdrs(root, options = {}) {
   const excludes = options.excludes || [];
-  const files = await walkRepo(root, excludes);
+  const files = options.files ?? await walkRepo(root, excludes);
   const adrFiles = files.filter(isAdrFile).sort();
   if (adrFiles.length === 0) {
     return checkResult("adrs", [], "No ADRs detected.");
@@ -3113,15 +3215,25 @@ const AVAILABLE_CHECKS = {
   repo_map: checkRepoMap,
   adrs: checkAdrs
 };
-async function runAudit(root, selectedChecks) {
+const CHECKS_USING_FILES = /* @__PURE__ */ new Set(["links", "commands", "agents_md", "nesting", "adrs"]);
+const CHECKS_USING_SURFACE = /* @__PURE__ */ new Set(["commands", "agents_md"]);
+async function runAudit(root, selectedChecks, options = {}) {
   const results = {};
   const names = selectedChecks.length > 0 ? selectedChecks : Object.keys(AVAILABLE_CHECKS);
   for (const name of names) {
-    const runner = AVAILABLE_CHECKS[name];
-    if (!runner) {
+    if (!AVAILABLE_CHECKS[name]) {
       throw new Error(`Unknown check: ${name}. Valid checks: ${Object.keys(AVAILABLE_CHECKS).join(", ")}`);
     }
-    results[name] = await runner(root);
+  }
+  const shared = { ...options };
+  if (!shared.files && names.some((name) => CHECKS_USING_FILES.has(name))) {
+    shared.files = await walkRepo(root, shared.excludes || []);
+  }
+  if (!shared.surfaceByRunner && shared.files && names.some((name) => CHECKS_USING_SURFACE.has(name))) {
+    shared.surfaceByRunner = await collectTaskSurfaceByRunner(root, shared.files);
+  }
+  for (const name of names) {
+    results[name] = await AVAILABLE_CHECKS[name](root, shared);
   }
   return auditReport(root, results);
 }
@@ -3142,6 +3254,13 @@ function parseCliArgs(argv) {
         throw new Error("--format requires either json or markdown");
       }
       args.format = value;
+      index += 1;
+    } else if (arg === "--stale-threshold-days") {
+      const value = argv[index + 1];
+      if (!value || !/^\d+$/u.test(value) || Number.parseInt(value, 10) < 1) {
+        throw new Error("--stale-threshold-days requires a positive integer number of days");
+      }
+      args.staleThresholdDays = Number.parseInt(value, 10);
       index += 1;
     } else if (arg === "--check-all") {
       args.runAll = true;
@@ -3173,10 +3292,11 @@ async function runCli(argv = process.argv.slice(2)) {
   }
   const checks = args.runAll ? Object.keys(AVAILABLE_CHECKS) : args.checks;
   const singleCheck = checks.length === 1 && !args.runAll;
+  const options = { staleThresholdDays: args.staleThresholdDays };
   if (singleCheck) {
     const name = checks[0];
     const runner = AVAILABLE_CHECKS[name];
-    const result = await runner(root);
+    const result = await runner(root, options);
     const output2 = args.format === "markdown" ? formatSingleCheckMarkdown(result) : formatSingleCheckJson(result);
     process.stdout.write(`${output2}
 `);
@@ -3185,7 +3305,7 @@ async function runCli(argv = process.argv.slice(2)) {
     }
     return;
   }
-  const report = await runAudit(root, checks);
+  const report = await runAudit(root, checks, options);
   const output = args.format === "markdown" ? formatAuditMarkdown(report) : formatJson(report);
   process.stdout.write(`${output}
 `);
@@ -3224,7 +3344,7 @@ const AGENTS_MD = [
   "## Architecture",
   "",
   "Describe module boundaries and where each subsystem lives, or link to",
-  "a `docs/repo-map.md` / `ARCHITECTURE.md` file that does.",
+  "a repo map (for example an `ARCHITECTURE.md` at the repo root) that does.",
   "",
   "## Working agreements",
   "",
@@ -3329,7 +3449,7 @@ const USAGE = [
   "Usage: legibility <subcommand> [options]",
   "",
   "Subcommands:",
-  "  score <path>             Produce the seven-dimension legibility report.",
+  "  score <path>             Produce the eight-dimension legibility report.",
   "  list-scopes <path>       List detected scopes in the repo.",
   "  list-metrics             List the available scoring metrics.",
   "  audit [flags] <path>     Run mechanical audit checks.",
@@ -3348,6 +3468,7 @@ const USAGE = [
   "  --check-repo-map             Require a one-screen architecture index.",
   "  --check-adrs                 Validate ADR sections, index, and supersession links.",
   "  --check-all                  Run every audit check and emit an aggregate report.",
+  "  --stale-threshold-days N     Staleness threshold for --check-execplans (default 30).",
   "",
   "Shared flags:",
   "  --format json|markdown   Output format (default: json).",
@@ -3384,8 +3505,7 @@ const invokedAsMain = (() => {
   const entry = process.argv[1];
   if (!entry) return false;
   try {
-    const entryUrl = new URL(`file://${path.resolve(entry)}`).href;
-    return import.meta.url === entryUrl;
+    return realpathSync(path.resolve(entry)) === realpathSync(fileURLToPath(import.meta.url));
   } catch (_error) {
     return false;
   }

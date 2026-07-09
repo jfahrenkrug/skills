@@ -35,27 +35,33 @@ export interface ParsedExecPlan {
    sectionBodies: Record<string, string>;
 }
 
-function extractSectionBodies(text: string, headingTexts: string[]): Record<string, string> {
+function isFencedLine(lineNumber: number, codeBlockRanges: Array<[number, number]>): boolean {
+   return codeBlockRanges.some(([ start, end ]) => lineNumber >= start && lineNumber <= end);
+}
+
+function extractSectionBodies(
+   lines: string[],
+   headings: Array<{ text: string; level: number; line: number }>,
+): Record<string, string> {
    const bodies: Record<string, string> = {};
-   const lines = text.split(/\r?\n/u);
-   const headingLines: Array<{ index: number; text: string }> = [];
-   for (let i = 0; i < lines.length; i += 1) {
-      const m = lines[i].match(/^##\s+(.*?)\s*#*\s*$/u);
-      if (m) {
-         headingLines.push({ index: i, text: m[1] });
-      }
-   }
-   for (let i = 0; i < headingLines.length; i += 1) {
-      const start = headingLines[i].index + 1;
-      const end = i + 1 < headingLines.length ? headingLines[i + 1].index : lines.length;
+   const sectionHeadings = headings.filter((h) => h.level === 2);
+   for (let i = 0; i < sectionHeadings.length; i += 1) {
+      const start = sectionHeadings[i].line;
+      const end = i + 1 < sectionHeadings.length ? sectionHeadings[i + 1].line - 1 : lines.length;
       const body = lines.slice(start, end).join('\n').trim();
-      bodies[headingLines[i].text.trim()] = body;
+      // Key by the canonical section name when the heading matches one (case-
+      // and whitespace-insensitively), so lookups by REQUIRED_SECTIONS names
+      // agree with the presentSections check.
+      const canonical = REQUIRED_SECTIONS.find((name) => {
+         return normalizeHeading(name) === normalizeHeading(sectionHeadings[i].text);
+      });
+      bodies[canonical ?? sectionHeadings[i].text.trim()] = body;
    }
    return bodies;
 }
 
 export function parseExecPlan(text: string): ParsedExecPlan {
-   const { headings } = parseMarkdown(text);
+   const { headings, codeBlockRanges } = parseMarkdown(text);
    const presentHeadings = new Set(headings.map((h) => normalizeHeading(h.text)));
 
    const presentSections = new Set<string>();
@@ -69,9 +75,11 @@ export function parseExecPlan(text: string): ParsedExecPlan {
       }
    }
 
+   const lines = text.split(/\r?\n/u);
    const progress: ExecPlanProgress = { total: 0, done: 0, remaining: 0 };
-   for (const line of text.split(/\r?\n/u)) {
-      const match = line.match(CHECKBOX_REGEX);
+   for (let index = 0; index < lines.length; index += 1) {
+      if (isFencedLine(index + 1, codeBlockRanges)) continue;
+      const match = lines[index].match(CHECKBOX_REGEX);
       if (!match) continue;
       progress.total += 1;
       if (match[1] === 'x' || match[1] === 'X') {
@@ -81,7 +89,7 @@ export function parseExecPlan(text: string): ParsedExecPlan {
       }
    }
 
-   const sectionBodies = extractSectionBodies(text, headings.map((h) => h.text));
+   const sectionBodies = extractSectionBodies(lines, headings);
 
    return {
       headings: headings.map((h) => h.text),

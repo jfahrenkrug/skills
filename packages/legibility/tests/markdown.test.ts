@@ -154,5 +154,37 @@ describe('markdown', () => {
             { runner: 'gradle', token: 'releaseDocs' },
          ]);
       });
+
+      it('resolves nx run project:target references to the bare target name', () => {
+         const refs = extractTaskReferences('Run `npx nx run web:build` then `nx run web:serve:production`.');
+         expect(refs.map((ref) => ({ runner: ref.runner, token: ref.token }))).toEqual([
+            { runner: 'nx', token: 'build' },
+            { runner: 'nx', token: 'serve' },
+         ]);
+      });
+
+      it('does not treat nx built-in commands as task references', () => {
+         const refs = extractTaskReferences('Use `nx affected -t test`, `nx graph`, and `npx nx format:check`.');
+         expect(refs.filter((ref) => ref.runner === 'nx')).toEqual([]);
+      });
+
+      it('resolves gradle qualified task paths to the trailing task name', () => {
+         const refs = extractTaskReferences('Run `./gradlew :app:test` and `./gradlew :app:releaseDocs`.');
+         expect(refs.map((ref) => ({ runner: ref.runner, token: ref.token }))).toEqual([
+            { runner: 'gradle', token: 'releaseDocs' },
+         ]);
+      });
+
+      it('skips maven plugin:goal invocations, which cannot be verified against the pom', () => {
+         const refs = extractTaskReferences('Run `mvn spring-boot:run` and `mvn versions:display-dependency-updates`.');
+         expect(refs.filter((ref) => ref.runner === 'maven')).toEqual([]);
+      });
+
+      it('does not treat common mix and turbo built-ins as task references', () => {
+         const refs = extractTaskReferences('Use `mix test`, `mix deps.get`, `turbo prune`, and `mix custom.task`.');
+         expect(refs.map((ref) => ({ runner: ref.runner, token: ref.token }))).toEqual([
+            { runner: 'mix', token: 'custom.task' },
+         ]);
+      });
    });
 });

@@ -9,6 +9,11 @@ const TASK_SYM = /^\s*task\s+:([A-Za-z_][A-Za-z0-9_]*)\b/u;
 const TASK_STR = /^\s*task\s+["']([A-Za-z_][A-Za-z0-9_]*)["']/u;
 const BLOCK_END = /^\s*end\b/u;
 const BLOCK_OPEN = /\bdo\b(\s*\|[^|]*\|)?\s*$|\{\s*(?:\|[^|]*\|)?\s*$/u;
+// Ruby constructs that open a block without `do` (each closed by `end`).
+// Modifier forms (`x if y`) don't match because the keyword must lead the line.
+const KEYWORD_BLOCK_OPEN = /^\s*(?:def|class|module|if|unless|case|while|until|for|begin)\b/u;
+// Endless method definitions (`def foo = bar`) have no matching `end`.
+const ENDLESS_DEF = /^\s*def\s+(?:self\.)?[a-z_][A-Za-z0-9_]*[?!]?\s*(?:\([^)]*\))?\s*=(?!=)/u;
 
 export function parseRakefile(text: string): Set<string> {
    const names = new Set<string>();
@@ -42,6 +47,13 @@ export function parseRakefile(text: string): Set<string> {
 
       if (BLOCK_END.test(line)) {
          if (stack.length > 0) stack.pop();
+         continue;
+      }
+
+      if (KEYWORD_BLOCK_OPEN.test(line)
+         && !ENDLESS_DEF.test(line)
+         && !/\bend\s*$/u.test(trimmed)) {
+         stack.push({ kind: 'other' });
          continue;
       }
 
