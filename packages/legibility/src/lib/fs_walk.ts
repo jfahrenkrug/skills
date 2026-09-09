@@ -40,6 +40,15 @@ export const IGNORED_DIRS = new Set([
    '.windsurf',
 ]);
 
+// Path-scoped (not basename-scoped) exclusions: subpaths that hold vendored,
+// non-project-owned content inside a directory that is otherwise walkable.
+// `.agents/` itself stays walkable (see IGNORED_DIRS comment above), but
+// `.agents/skills/` is the documented Codex-equivalent of `.claude/skills/`
+// — vendored skill packages, not project-authored content.
+export const IGNORED_PATH_PATTERNS = [
+   '.agents/skills',
+];
+
 export const DOC_EXTENSIONS = new Set([ '.md', '.mdx', '.rst', '.txt' ]);
 
 export const MAX_TEXT_SIZE = 250_000;
@@ -125,7 +134,7 @@ export async function readDirEntries(targetPath: string): Promise<import('node:f
 }
 
 export async function walkRepo(root: string, excludes: string[] = []): Promise<string[]> {
-   const excludePatterns = excludes
+   const excludePatterns = [ ...IGNORED_PATH_PATTERNS, ...excludes ]
       .map((pattern) => pattern.trim().replace(/^\/+|\/+$/gu, ''))
       .filter(Boolean);
    const stack = [ root ];

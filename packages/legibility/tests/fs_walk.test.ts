@@ -6,6 +6,7 @@ import path from 'node:path';
 
 import {
    IGNORED_DIRS,
+   IGNORED_PATH_PATTERNS,
    DOC_EXTENSIONS,
    MAX_TEXT_SIZE,
    toPosix,
@@ -51,6 +52,10 @@ describe('fs_walk', () => {
 
       it('does not ignore .agents/, the project-owned exec-plans directory', () => {
          expect(IGNORED_DIRS.has('.agents')).toBe(false);
+      });
+
+      it('path-excludes .agents/skills/, the vendored skill packages under .agents/', () => {
+         expect(IGNORED_PATH_PATTERNS).toContain('.agents/skills');
       });
 
       it('recognizes documentation extensions', () => {
@@ -117,13 +122,14 @@ describe('fs_walk', () => {
          await fs.mkdir(path.join(tempDir, 'node_modules', 'dep'), { recursive: true });
          await fs.mkdir(path.join(tempDir, 'docs'), { recursive: true });
          await fs.mkdir(path.join(tempDir, '.claude', 'skills', 'some-skill'), { recursive: true });
-         await fs.mkdir(path.join(tempDir, '.agents'), { recursive: true });
+         await fs.mkdir(path.join(tempDir, '.agents', 'skills', 'vendored-skill'), { recursive: true });
          await fs.writeFile(path.join(tempDir, 'README.md'), '# hi');
          await fs.writeFile(path.join(tempDir, 'src', 'main.js'), '// main');
          await fs.writeFile(path.join(tempDir, 'node_modules', 'dep', 'index.js'), '// dep');
          await fs.writeFile(path.join(tempDir, 'docs', 'intro.md'), '# intro');
          await fs.writeFile(path.join(tempDir, '.claude', 'skills', 'some-skill', 'SKILL.md'), '# skill');
          await fs.writeFile(path.join(tempDir, '.agents', 'PLANS.md'), '# plans');
+         await fs.writeFile(path.join(tempDir, '.agents', 'skills', 'vendored-skill', 'SKILL.md'), '# vendored skill');
       });
 
       afterAll(async () => {
@@ -150,6 +156,11 @@ describe('fs_walk', () => {
       it('does not skip the project-owned .agents/ directory', async () => {
          const files = await walkRepo(tempDir);
          expect(files.includes('.agents/PLANS.md')).toBe(true);
+      });
+
+      it('skips vendored skill packages under .agents/skills/', async () => {
+         const files = await walkRepo(tempDir);
+         expect(files.some((f) => f.startsWith('.agents/skills/'))).toBe(false);
       });
 
       it('enumerates files inside non-ignored dirs', async () => {

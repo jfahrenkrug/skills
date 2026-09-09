@@ -465,6 +465,19 @@ function looksLikePath(content: string): boolean {
    return true;
 }
 
+const GIT_REMOTE_NAMES = new Set([ 'origin', 'upstream' ]);
+
+/**
+ * Git refs like `origin/main` or `HEAD~1` share the path-like shape
+ * `looksLikePath` matches (a single slash-containing token) but name commits,
+ * not files — flagging them as broken paths is a false positive.
+ */
+function looksLikeGitRef(candidate: string): boolean {
+   if (candidate === 'HEAD' || /^HEAD[~^]/u.test(candidate)) return true;
+   const [ first, ...rest ] = candidate.split('/');
+   return rest.length > 0 && GIT_REMOTE_NAMES.has(first);
+}
+
 async function repoPathExists(root: string, relpath: string): Promise<boolean> {
    try {
       await fs.stat(path.join(root, relpath));
@@ -514,6 +527,7 @@ export async function checkAgentsMd(
          if (!looksLikePath(span.content)) continue;
          const candidate = span.content.trim();
          if (candidate.startsWith('/') || candidate.startsWith('~')) continue;
+         if (looksLikeGitRef(candidate)) continue;
          const normalized = candidate.startsWith('./') ? candidate.slice(2) : candidate;
          if (normalized.startsWith('..')) continue;
          if (!(await repoPathExists(root, normalized))) {

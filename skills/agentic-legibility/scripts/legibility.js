@@ -45,6 +45,9 @@ const IGNORED_DIRS = /* @__PURE__ */ new Set([
   ".roo",
   ".windsurf"
 ]);
+const IGNORED_PATH_PATTERNS = [
+  ".agents/skills"
+];
 const DOC_EXTENSIONS = /* @__PURE__ */ new Set([".md", ".mdx", ".rst", ".txt"]);
 const MAX_TEXT_SIZE = 25e4;
 function toPosix(value) {
@@ -112,7 +115,7 @@ async function readDirEntries(targetPath) {
   }
 }
 async function walkRepo(root, excludes = []) {
-  const excludePatterns = excludes.map((pattern) => pattern.trim().replace(/^\/+|\/+$/gu, "")).filter(Boolean);
+  const excludePatterns = [...IGNORED_PATH_PATTERNS, ...excludes].map((pattern) => pattern.trim().replace(/^\/+|\/+$/gu, "")).filter(Boolean);
   const stack = [root];
   const results = [];
   while (stack.length > 0) {
@@ -2788,6 +2791,12 @@ function looksLikePath(content) {
   if (!trimmed.includes("/")) return false;
   return true;
 }
+const GIT_REMOTE_NAMES = /* @__PURE__ */ new Set(["origin", "upstream"]);
+function looksLikeGitRef(candidate) {
+  if (candidate === "HEAD" || /^HEAD[~^]/u.test(candidate)) return true;
+  const [first, ...rest] = candidate.split("/");
+  return rest.length > 0 && GIT_REMOTE_NAMES.has(first);
+}
 async function repoPathExists(root, relpath) {
   try {
     await promises.stat(path.join(root, relpath));
@@ -2829,6 +2838,7 @@ async function checkAgentsMd(root, options = {}) {
       if (!looksLikePath(span.content)) continue;
       const candidate = span.content.trim();
       if (candidate.startsWith("/") || candidate.startsWith("~")) continue;
+      if (looksLikeGitRef(candidate)) continue;
       const normalized = candidate.startsWith("./") ? candidate.slice(2) : candidate;
       if (normalized.startsWith("..")) continue;
       if (!await repoPathExists(root, normalized)) {
