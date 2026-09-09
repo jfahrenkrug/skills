@@ -20,6 +20,24 @@ export const IGNORED_DIRS = new Set([
    'out',
    'target',
    'vendor',
+   // Agent-tool config/skill folders: not code the project owner maintains,
+   // so legibility checks shouldn't flag issues inside them. Checks that
+   // need a specific, project-owned signal from one of these dirs (e.g.
+   // `.claude/hooks/`) read it directly via fs instead of relying on the walk.
+   // (`.agents/` is deliberately NOT here — it's this tool's own required,
+   // project-authored convention directory for exec-plans, not a vendored
+   // skill folder; see REQUIRED_ARTIFACTS in audit_repo.ts.)
+   '.aider',
+   '.amazonq',
+   '.claude',
+   '.cline',
+   '.codex',
+   '.continue',
+   '.cursor',
+   '.gemini',
+   '.opencode',
+   '.roo',
+   '.windsurf',
 ]);
 
 export const DOC_EXTENSIONS = new Set([ '.md', '.mdx', '.rst', '.txt' ]);

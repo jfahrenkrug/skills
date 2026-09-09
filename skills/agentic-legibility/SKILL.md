@@ -4,7 +4,7 @@ description: Use when the user asks to improve a repository's agentic legibility
 compatibility: Requires Node.js 20+
 metadata:
   author: Johannes Fahrenkrug (https://springenwerk.com)
-  version: "0.2.0"
+  version: "0.2.1"
 allowed-tools: Bash(node ${CLAUDE_SKILL_DIR}/scripts/legibility.js:*) Read Write Edit Glob Grep
 ---
 

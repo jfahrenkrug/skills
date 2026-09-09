@@ -25,7 +25,25 @@ const IGNORED_DIRS = /* @__PURE__ */ new Set([
   "node_modules",
   "out",
   "target",
-  "vendor"
+  "vendor",
+  // Agent-tool config/skill folders: not code the project owner maintains,
+  // so legibility checks shouldn't flag issues inside them. Checks that
+  // need a specific, project-owned signal from one of these dirs (e.g.
+  // `.claude/hooks/`) read it directly via fs instead of relying on the walk.
+  // (`.agents/` is deliberately NOT here — it's this tool's own required,
+  // project-authored convention directory for exec-plans, not a vendored
+  // skill folder; see REQUIRED_ARTIFACTS in audit_repo.ts.)
+  ".aider",
+  ".amazonq",
+  ".claude",
+  ".cline",
+  ".codex",
+  ".continue",
+  ".cursor",
+  ".gemini",
+  ".opencode",
+  ".roo",
+  ".windsurf"
 ]);
 const DOC_EXTENSIONS = /* @__PURE__ */ new Set([".md", ".mdx", ".rst", ".txt"]);
 const MAX_TEXT_SIZE = 25e4;
@@ -1412,6 +1430,26 @@ async function scoreLintFormat(ctx) {
   }
   return metric(0, "high", evidence, "No lint or format gates were detected.", "Add at least one linter and formatter with explicit repo-level commands.");
 }
+async function listClaudeHookFiles(root) {
+  const results = [];
+  const stack = [path.join(root, ".claude", "hooks")];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) {
+      continue;
+    }
+    const entries = await readDirEntries(current);
+    for (const entry of entries) {
+      const absolutePath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(absolutePath);
+      } else {
+        results.push(rel(root, absolutePath));
+      }
+    }
+  }
+  return results;
+}
 async function scoreGuardrailsAndHooks(ctx) {
   const families = {
     "pre-commit": [],
@@ -1429,10 +1467,8 @@ async function scoreGuardrailsAndHooks(ctx) {
     if (relpath.startsWith(".husky/") || relpath.startsWith(".githooks/")) {
       families["husky/githooks"].push(relpath);
     }
-    if (relpath.startsWith(".claude/hooks/")) {
-      families["agent-hooks"].push(relpath);
-    }
   }
+  families["agent-hooks"] = await listClaudeHookFiles(ctx.root);
   const presentFamilies = Object.entries(families).filter(([, files]) => files.length > 0);
   const evidence = presentFamilies.flatMap(([, files]) => files).slice(0, MAX_EVIDENCE);
   if (presentFamilies.length >= 2) {
