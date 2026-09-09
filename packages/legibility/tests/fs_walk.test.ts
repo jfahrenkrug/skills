@@ -35,6 +35,24 @@ describe('fs_walk', () => {
          expect(IGNORED_DIRS.has('src')).toBe(false);
       });
 
+      it('ignores agent-tool config/skill folders not owned by the project', () => {
+         expect(IGNORED_DIRS.has('.claude')).toBe(true);
+         expect(IGNORED_DIRS.has('.cursor')).toBe(true);
+         expect(IGNORED_DIRS.has('.windsurf')).toBe(true);
+         expect(IGNORED_DIRS.has('.codex')).toBe(true);
+         expect(IGNORED_DIRS.has('.aider')).toBe(true);
+         expect(IGNORED_DIRS.has('.continue')).toBe(true);
+         expect(IGNORED_DIRS.has('.cline')).toBe(true);
+         expect(IGNORED_DIRS.has('.roo')).toBe(true);
+         expect(IGNORED_DIRS.has('.gemini')).toBe(true);
+         expect(IGNORED_DIRS.has('.opencode')).toBe(true);
+         expect(IGNORED_DIRS.has('.amazonq')).toBe(true);
+      });
+
+      it('does not ignore .agents/, the project-owned exec-plans directory', () => {
+         expect(IGNORED_DIRS.has('.agents')).toBe(false);
+      });
+
       it('recognizes documentation extensions', () => {
          expect(DOC_EXTENSIONS.has('.md')).toBe(true);
          expect(DOC_EXTENSIONS.has('.mdx')).toBe(true);
@@ -98,10 +116,14 @@ describe('fs_walk', () => {
          await fs.mkdir(path.join(tempDir, 'src'), { recursive: true });
          await fs.mkdir(path.join(tempDir, 'node_modules', 'dep'), { recursive: true });
          await fs.mkdir(path.join(tempDir, 'docs'), { recursive: true });
+         await fs.mkdir(path.join(tempDir, '.claude', 'skills', 'some-skill'), { recursive: true });
+         await fs.mkdir(path.join(tempDir, '.agents'), { recursive: true });
          await fs.writeFile(path.join(tempDir, 'README.md'), '# hi');
          await fs.writeFile(path.join(tempDir, 'src', 'main.js'), '// main');
          await fs.writeFile(path.join(tempDir, 'node_modules', 'dep', 'index.js'), '// dep');
          await fs.writeFile(path.join(tempDir, 'docs', 'intro.md'), '# intro');
+         await fs.writeFile(path.join(tempDir, '.claude', 'skills', 'some-skill', 'SKILL.md'), '# skill');
+         await fs.writeFile(path.join(tempDir, '.agents', 'PLANS.md'), '# plans');
       });
 
       afterAll(async () => {
@@ -118,6 +140,16 @@ describe('fs_walk', () => {
       it('skips IGNORED_DIRS entries', async () => {
          const files = await walkRepo(tempDir);
          expect(files.some((f) => f.startsWith('node_modules/'))).toBe(false);
+      });
+
+      it('skips agent-tool folders such as .claude', async () => {
+         const files = await walkRepo(tempDir);
+         expect(files.some((f) => f.startsWith('.claude/'))).toBe(false);
+      });
+
+      it('does not skip the project-owned .agents/ directory', async () => {
+         const files = await walkRepo(tempDir);
+         expect(files.includes('.agents/PLANS.md')).toBe(true);
       });
 
       it('enumerates files inside non-ignored dirs', async () => {

@@ -3,6 +3,7 @@ import {
    DOC_EXTENSIONS,
    readText,
    isDirectory,
+   readDirEntries,
    rel,
    toPosix,
    walkRepo,
@@ -553,6 +554,33 @@ async function scoreLintFormat(ctx: RepoContext): Promise<MetricResult> {
    return metric(0, 'high', evidence, 'No lint or format gates were detected.', 'Add at least one linter and formatter with explicit repo-level commands.');
 }
 
+async function listClaudeHookFiles(root: string): Promise<string[]> {
+   const results: string[] = [];
+   const stack = [ path.join(root, '.claude', 'hooks') ];
+
+   while (stack.length > 0) {
+      const current = stack.pop();
+
+      if (!current) {
+         continue;
+      }
+
+      const entries = await readDirEntries(current);
+
+      for (const entry of entries) {
+         const absolutePath = path.join(current, entry.name);
+
+         if (entry.isDirectory()) {
+            stack.push(absolutePath);
+         } else {
+            results.push(rel(root, absolutePath));
+         }
+      }
+   }
+
+   return results;
+}
+
 async function scoreGuardrailsAndHooks(ctx: RepoContext): Promise<MetricResult> {
    const families: Record<string, string[]> = {
       'pre-commit': [],
@@ -571,10 +599,12 @@ async function scoreGuardrailsAndHooks(ctx: RepoContext): Promise<MetricResult> 
       if (relpath.startsWith('.husky/') || relpath.startsWith('.githooks/')) {
          families['husky/githooks'].push(relpath);
       }
-      if (relpath.startsWith('.claude/hooks/')) {
-         families['agent-hooks'].push(relpath);
-      }
    }
+   // `.claude/` is excluded from the general repo walk (agent-tool config,
+   // not project-owned code), so agent hooks are detected via a direct,
+   // targeted fs read instead — same approach checkCrossToolAliases uses
+   // for `.cursor/rules/`.
+   families['agent-hooks'] = await listClaudeHookFiles(ctx.root);
 
    const presentFamilies = Object.entries(families).filter(([ , files ]) => files.length > 0);
    const evidence = presentFamilies.flatMap(([ , files ]) => files).slice(0, MAX_EVIDENCE);
