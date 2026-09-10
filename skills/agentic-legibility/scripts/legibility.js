@@ -45,6 +45,10 @@ const IGNORED_DIRS = /* @__PURE__ */ new Set([
   ".roo",
   ".windsurf"
 ]);
+const IGNORED_PATH_PATTERNS = [
+  ".agents/skills",
+  "**/.agents/skills"
+];
 const DOC_EXTENSIONS = /* @__PURE__ */ new Set([".md", ".mdx", ".rst", ".txt"]);
 const MAX_TEXT_SIZE = 25e4;
 function toPosix(value) {
@@ -112,7 +116,7 @@ async function readDirEntries(targetPath) {
   }
 }
 async function walkRepo(root, excludes = []) {
-  const excludePatterns = excludes.map((pattern) => pattern.trim().replace(/^\/+|\/+$/gu, "")).filter(Boolean);
+  const excludePatterns = [...IGNORED_PATH_PATTERNS, ...excludes].map((pattern) => pattern.trim().replace(/^\/+|\/+$/gu, "")).filter(Boolean);
   const stack = [root];
   const results = [];
   while (stack.length > 0) {
@@ -1158,6 +1162,7 @@ async function collectContext(root, excludes) {
   const surface = await collectAllTaskSurfaces(root, files);
   return {
     root,
+    excludes,
     files,
     relpaths,
     doc_paths: docs,
@@ -1430,7 +1435,14 @@ async function scoreLintFormat(ctx) {
   }
   return metric(0, "high", evidence, "No lint or format gates were detected.", "Add at least one linter and formatter with explicit repo-level commands.");
 }
-async function listClaudeHookFiles(root) {
+const HOOK_DEPENDENCY_DIRS = /* @__PURE__ */ new Set([
+  ".venv",
+  ".yarn",
+  "__pycache__",
+  "node_modules"
+]);
+async function listClaudeHookFiles(root, excludes = []) {
+  const excludePatterns = excludes.map((pattern) => pattern.trim().replace(/^\/+|\/+$/gu, "")).filter(Boolean);
   const results = [];
   const stack = [path.join(root, ".claude", "hooks")];
   while (stack.length > 0) {
@@ -1441,14 +1453,20 @@ async function listClaudeHookFiles(root) {
     const entries = await readDirEntries(current);
     for (const entry of entries) {
       const absolutePath = path.join(current, entry.name);
+      const relpath = rel(root, absolutePath);
+      if (matchesExclude(relpath, excludePatterns)) {
+        continue;
+      }
       if (entry.isDirectory()) {
-        stack.push(absolutePath);
+        if (!HOOK_DEPENDENCY_DIRS.has(entry.name)) {
+          stack.push(absolutePath);
+        }
       } else {
-        results.push(rel(root, absolutePath));
+        results.push(relpath);
       }
     }
   }
-  return results;
+  return results.sort();
 }
 async function scoreGuardrailsAndHooks(ctx) {
   const families = {
@@ -1468,7 +1486,7 @@ async function scoreGuardrailsAndHooks(ctx) {
       families["husky/githooks"].push(relpath);
     }
   }
-  families["agent-hooks"] = await listClaudeHookFiles(ctx.root);
+  families["agent-hooks"] = await listClaudeHookFiles(ctx.root, ctx.excludes);
   const presentFamilies = Object.entries(families).filter(([, files]) => files.length > 0);
   const evidence = presentFamilies.flatMap(([, files]) => files).slice(0, MAX_EVIDENCE);
   if (presentFamilies.length >= 2) {
@@ -1656,12 +1674,27 @@ function normalizeMetricNames(rawMetrics) {
   }
   return names;
 }
+function rebaseExcludes(excludes, scope) {
+  if (scope === ROOT_SCOPE) {
+    return excludes;
+  }
+  const prefix = `${scope.replace(/\/+$/gu, "")}/`;
+  const rebased = [];
+  for (const pattern of excludes) {
+    rebased.push(pattern);
+    const trimmed = pattern.trim().replace(/^\/+/gu, "");
+    if (trimmed.startsWith(prefix) && trimmed.length > prefix.length) {
+      rebased.push(trimmed.slice(prefix.length));
+    }
+  }
+  return rebased;
+}
 async function buildReport(root, excludes, selectedMetrics, scope) {
   const rootContext = await collectContext(root, excludes);
   const normalizedScope = scope ? normalizeScope(root, scope) : void 0;
   const [evaluatedScope, discoveredScopes, scopeSelection] = chooseScope(rootContext, normalizedScope);
   const targetRoot = evaluatedScope === ROOT_SCOPE ? root : path.resolve(root, evaluatedScope);
-  const context = targetRoot === root ? rootContext : await collectContext(targetRoot, excludes);
+  const context = targetRoot === root ? rootContext : await collectContext(targetRoot, rebaseExcludes(excludes, evaluatedScope));
   const metrics = {};
   for (const metricName of selectedMetrics) {
     metrics[metricName] = await METRIC_SCORERS[metricName](context);
@@ -2788,6 +2821,14 @@ function looksLikePath(content) {
   if (!trimmed.includes("/")) return false;
   return true;
 }
+const GIT_REMOTE_NAMES = /* @__PURE__ */ new Set(["origin", "upstream"]);
+function looksLikeGitRef(candidate) {
+  const [first, second] = candidate.split("/");
+  if (second === void 0) return false;
+  if (GIT_REMOTE_NAMES.has(first)) return true;
+  if (first === "refs") return second.length > 0;
+  return /^HEAD[~^]/u.test(first);
+}
 async function repoPathExists(root, relpath) {
   try {
     await promises.stat(path.join(root, relpath));
@@ -2829,6 +2870,7 @@ async function checkAgentsMd(root, options = {}) {
       if (!looksLikePath(span.content)) continue;
       const candidate = span.content.trim();
       if (candidate.startsWith("/") || candidate.startsWith("~")) continue;
+      if (looksLikeGitRef(candidate)) continue;
       const normalized = candidate.startsWith("./") ? candidate.slice(2) : candidate;
       if (normalized.startsWith("..")) continue;
       if (!await repoPathExists(root, normalized)) {

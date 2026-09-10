@@ -1,6 +1,7 @@
 import path from 'node:path';
 import {
    DOC_EXTENSIONS,
+   matchesExclude,
    readText,
    isDirectory,
    readDirEntries,
@@ -75,6 +76,7 @@ interface MetricResult {
 
 interface RepoContext {
    root: string;
+   excludes: string[];
    files: string[];
    relpaths: Set<string>;
    doc_paths: string[];
@@ -203,6 +205,7 @@ async function collectContext(root: string, excludes: string[]): Promise<RepoCon
 
    return {
       root,
+      excludes,
       files,
       relpaths,
       doc_paths: docs,
@@ -554,7 +557,21 @@ async function scoreLintFormat(ctx: RepoContext): Promise<MetricResult> {
    return metric(0, 'high', evidence, 'No lint or format gates were detected.', 'Add at least one linter and formatter with explicit repo-level commands.');
 }
 
-async function listClaudeHookFiles(root: string): Promise<string[]> {
+// Hook helpers can carry their own dependency trees; those are vendored, not
+// project-owned. Deliberately narrower than `IGNORED_DIRS`: build-output names
+// like `dist/` are excluded there, but a repo whose hooks are compiled
+// TypeScript legitimately ships its hook entrypoints as `.claude/hooks/dist/*.js`.
+const HOOK_DEPENDENCY_DIRS = new Set([
+   '.venv',
+   '.yarn',
+   '__pycache__',
+   'node_modules',
+]);
+
+async function listClaudeHookFiles(root: string, excludes: string[] = []): Promise<string[]> {
+   const excludePatterns = excludes
+      .map((pattern) => pattern.trim().replace(/^\/+|\/+$/gu, ''))
+      .filter(Boolean);
    const results: string[] = [];
    const stack = [ path.join(root, '.claude', 'hooks') ];
 
@@ -569,16 +586,23 @@ async function listClaudeHookFiles(root: string): Promise<string[]> {
 
       for (const entry of entries) {
          const absolutePath = path.join(current, entry.name);
+         const relpath = rel(root, absolutePath);
+
+         if (matchesExclude(relpath, excludePatterns)) {
+            continue;
+         }
 
          if (entry.isDirectory()) {
-            stack.push(absolutePath);
+            if (!HOOK_DEPENDENCY_DIRS.has(entry.name)) {
+               stack.push(absolutePath);
+            }
          } else {
-            results.push(rel(root, absolutePath));
+            results.push(relpath);
          }
       }
    }
 
-   return results;
+   return results.sort();
 }
 
 async function scoreGuardrailsAndHooks(ctx: RepoContext): Promise<MetricResult> {
@@ -604,7 +628,7 @@ async function scoreGuardrailsAndHooks(ctx: RepoContext): Promise<MetricResult> 
    // not project-owned code), so agent hooks are detected via a direct,
    // targeted fs read instead — same approach checkCrossToolAliases uses
    // for `.cursor/rules/`.
-   families['agent-hooks'] = await listClaudeHookFiles(ctx.root);
+   families['agent-hooks'] = await listClaudeHookFiles(ctx.root, ctx.excludes);
 
    const presentFamilies = Object.entries(families).filter(([ , files ]) => files.length > 0);
    const evidence = presentFamilies.flatMap(([ , files ]) => files).slice(0, MAX_EVIDENCE);
@@ -865,6 +889,33 @@ function normalizeMetricNames(rawMetrics: string[]): MetricName[] {
    return names;
 }
 
+/**
+ * `--exclude` patterns are written relative to the repo root, but a scoped run
+ * evaluates a subdirectory, where paths are relative to that scope. Re-express
+ * each pattern in scope-relative terms so it still applies; the original is
+ * kept too, so depth-agnostic globs (`**\/x`) keep matching.
+ */
+function rebaseExcludes(excludes: string[], scope: string): string[] {
+   if (scope === ROOT_SCOPE) {
+      return excludes;
+   }
+
+   const prefix = `${scope.replace(/\/+$/gu, '')}/`;
+   const rebased: string[] = [];
+
+   for (const pattern of excludes) {
+      rebased.push(pattern);
+
+      const trimmed = pattern.trim().replace(/^\/+/gu, '');
+
+      if (trimmed.startsWith(prefix) && trimmed.length > prefix.length) {
+         rebased.push(trimmed.slice(prefix.length));
+      }
+   }
+
+   return rebased;
+}
+
 export async function buildReport(
    root: string,
    excludes: string[],
@@ -875,7 +926,9 @@ export async function buildReport(
    const normalizedScope = scope ? normalizeScope(root, scope) : undefined;
    const [ evaluatedScope, discoveredScopes, scopeSelection ] = chooseScope(rootContext, normalizedScope);
    const targetRoot = evaluatedScope === ROOT_SCOPE ? root : path.resolve(root, evaluatedScope);
-   const context = targetRoot === root ? rootContext : await collectContext(targetRoot, excludes);
+   const context = targetRoot === root
+      ? rootContext
+      : await collectContext(targetRoot, rebaseExcludes(excludes, evaluatedScope));
    const metrics: Record<string, MetricResult> = {};
 
    for (const metricName of selectedMetrics) {
