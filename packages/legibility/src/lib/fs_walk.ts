@@ -44,9 +44,12 @@ export const IGNORED_DIRS = new Set([
 // non-project-owned content inside a directory that is otherwise walkable.
 // `.agents/` itself stays walkable (see IGNORED_DIRS comment above), but
 // `.agents/skills/` is the documented Codex-equivalent of `.claude/skills/`
-// — vendored skill packages, not project-authored content.
+// — vendored skill packages, not project-authored content. Both a root-level
+// and a nested form are listed so per-package `.agents/` dirs in a monorepo
+// are excluded at any depth, matching the basename-scoped `IGNORED_DIRS`.
 export const IGNORED_PATH_PATTERNS = [
    '.agents/skills',
+   '**/.agents/skills',
 ];
 
 export const DOC_EXTENSIONS = new Set([ '.md', '.mdx', '.rst', '.txt' ]);

@@ -31,6 +31,38 @@ describe('checkAgentsMd', () => {
       expect(brokenPaths).toEqual([]);
    });
 
+   it('does not flag fully-qualified `refs/…` names as broken paths', async () => {
+      const root = await makeRepo();
+      await writeFile(
+         root,
+         'AGENTS.md',
+         '# Agents\n\nPush to `refs/heads/main` and tag `refs/tags/v1`.\n',
+      );
+      const result = await checkAgentsMd(root);
+      const brokenPaths = result.findings.filter((f) => f.message.includes('does not exist'));
+      expect(brokenPaths).toEqual([]);
+   });
+
+   it('does not flag refs outside the common namespaces', async () => {
+      const root = await makeRepo();
+      await writeFile(
+         root,
+         'AGENTS.md',
+         '# Agents\n\nFetch `refs/pull/42/head` and inspect `refs/stash`.\n',
+      );
+      const result = await checkAgentsMd(root);
+      const brokenPaths = result.findings.filter((f) => f.message.includes('does not exist'));
+      expect(brokenPaths).toEqual([]);
+   });
+
+   it('still flags a missing path whose first segment merely looks ref-ish', async () => {
+      const root = await makeRepo();
+      await writeFile(root, 'AGENTS.md', '# Agents\n\nSee `references/missing.md` for details.\n');
+      const result = await checkAgentsMd(root);
+      const brokenPaths = result.findings.filter((f) => f.message.includes('does not exist'));
+      expect(brokenPaths).toHaveLength(1);
+   });
+
    it('still flags a genuinely missing repo path mentioned in backticks', async () => {
       const root = await makeRepo();
       await writeFile(root, 'AGENTS.md', '# Agents\n\nSee `docs/missing.md` for details.\n');

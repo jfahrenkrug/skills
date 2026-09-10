@@ -56,6 +56,7 @@ describe('fs_walk', () => {
 
       it('path-excludes .agents/skills/, the vendored skill packages under .agents/', () => {
          expect(IGNORED_PATH_PATTERNS).toContain('.agents/skills');
+         expect(IGNORED_PATH_PATTERNS).toContain('**/.agents/skills');
       });
 
       it('recognizes documentation extensions', () => {
@@ -123,6 +124,7 @@ describe('fs_walk', () => {
          await fs.mkdir(path.join(tempDir, 'docs'), { recursive: true });
          await fs.mkdir(path.join(tempDir, '.claude', 'skills', 'some-skill'), { recursive: true });
          await fs.mkdir(path.join(tempDir, '.agents', 'skills', 'vendored-skill'), { recursive: true });
+         await fs.mkdir(path.join(tempDir, 'packages', 'app', '.agents', 'skills', 'nested-skill'), { recursive: true });
          await fs.writeFile(path.join(tempDir, 'README.md'), '# hi');
          await fs.writeFile(path.join(tempDir, 'src', 'main.js'), '// main');
          await fs.writeFile(path.join(tempDir, 'node_modules', 'dep', 'index.js'), '// dep');
@@ -130,6 +132,10 @@ describe('fs_walk', () => {
          await fs.writeFile(path.join(tempDir, '.claude', 'skills', 'some-skill', 'SKILL.md'), '# skill');
          await fs.writeFile(path.join(tempDir, '.agents', 'PLANS.md'), '# plans');
          await fs.writeFile(path.join(tempDir, '.agents', 'skills', 'vendored-skill', 'SKILL.md'), '# vendored skill');
+         await fs.writeFile(
+            path.join(tempDir, 'packages', 'app', '.agents', 'skills', 'nested-skill', 'SKILL.md'),
+            '# nested skill',
+         );
       });
 
       afterAll(async () => {
@@ -161,6 +167,11 @@ describe('fs_walk', () => {
       it('skips vendored skill packages under .agents/skills/', async () => {
          const files = await walkRepo(tempDir);
          expect(files.some((f) => f.startsWith('.agents/skills/'))).toBe(false);
+      });
+
+      it('skips vendored skill packages under a nested package .agents/skills/', async () => {
+         const files = await walkRepo(tempDir);
+         expect(files.some((f) => f.includes('.agents/skills/'))).toBe(false);
       });
 
       it('enumerates files inside non-ignored dirs', async () => {

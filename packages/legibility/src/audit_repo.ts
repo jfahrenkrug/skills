@@ -468,14 +468,23 @@ function looksLikePath(content: string): boolean {
 const GIT_REMOTE_NAMES = new Set([ 'origin', 'upstream' ]);
 
 /**
- * Git refs like `origin/main` or `HEAD~1` share the path-like shape
- * `looksLikePath` matches (a single slash-containing token) but name commits,
- * not files — flagging them as broken paths is a false positive.
+ * Git refs like `origin/main`, `refs/heads/main` or `HEAD~1/file` share the
+ * path-like shape `looksLikePath` matches (a slash-containing token) but name
+ * commits, not files — flagging them as broken paths is a false positive.
+ *
+ * Any `refs/<namespace>/…` counts: the namespace set is open-ended
+ * (`refs/pull/42/head`, `refs/merge-requests/…`) and no real repo-relative
+ * path lives under `refs/`.
+ *
+ * Slash-free refs (`HEAD`, `HEAD~1`, `HEAD^`) never reach here: `looksLikePath`
+ * already rejects any token without a `/`.
  */
 function looksLikeGitRef(candidate: string): boolean {
-   if (candidate === 'HEAD' || /^HEAD[~^]/u.test(candidate)) return true;
-   const [ first, ...rest ] = candidate.split('/');
-   return rest.length > 0 && GIT_REMOTE_NAMES.has(first);
+   const [ first, second ] = candidate.split('/');
+   if (second === undefined) return false;
+   if (GIT_REMOTE_NAMES.has(first)) return true;
+   if (first === 'refs') return second.length > 0;
+   return /^HEAD[~^]/u.test(first);
 }
 
 async function repoPathExists(root: string, relpath: string): Promise<boolean> {
